@@ -28,18 +28,26 @@ struct QueryResult {
 fn convert_shell_to_json(input: &str) -> String {
     let mut result = input.to_string();
     
-    // Convert ObjectId("...") to {"$oid": "..."}
-    let oid_regex = Regex::new(r#"ObjectId\s*\(\s*["']([a-fA-F0-9]{24})["']\s*\)"#).unwrap();
-    result = oid_regex.replace_all(&result, r#"{"$oid":"$1"}"#).to_string();
+    // Convert ObjectId("...") to {"$oid": "..."} - with double quotes
+    let oid_regex_double = Regex::new(r#"ObjectId\s*\(\s*"([a-fA-F0-9]{24})"\s*\)"#).unwrap();
+    result = oid_regex_double.replace_all(&result, r#"{"$$oid":"$1"}"#).to_string();
+    
+    // Convert ObjectId('...') to {"$oid": "..."} - with single quotes
+    let oid_regex_single = Regex::new(r#"ObjectId\s*\(\s*'([a-fA-F0-9]{24})'\s*\)"#).unwrap();
+    result = oid_regex_single.replace_all(&result, r#"{"$$oid":"$1"}"#).to_string();
+    
+    // Convert ObjectId(...) to {"$oid": "..."} - without quotes (less common but supported)
+    let oid_regex_none = Regex::new(r#"ObjectId\s*\(\s*([a-fA-F0-9]{24})\s*\)"#).unwrap();
+    result = oid_regex_none.replace_all(&result, r#"{"$$oid":"$1"}"#).to_string();
     
     // Convert ISODate("...") to {"$date": "..."}
     let date_regex = Regex::new(r#"ISODate\s*\(\s*["']([^"']+)["']\s*\)"#).unwrap();
-    result = date_regex.replace_all(&result, r#"{"$date":"$1"}"#).to_string();
+    result = date_regex.replace_all(&result, r#"{"$$date":"$1"}"#).to_string();
     
     // Convert ISODate() (no args) to current date
     let date_now_regex = Regex::new(r#"ISODate\s*\(\s*\)"#).unwrap();
     let now = Utc::now().to_rfc3339();
-    result = date_now_regex.replace_all(&result, &format!(r#"{{"$date":"{}"}}"#, now)).to_string();
+    result = date_now_regex.replace_all(&result, &format!(r#"{{"$$date":"{}"}}"#, now)).to_string();
     
     result
 }
@@ -162,6 +170,10 @@ async fn execute_query(
     // Convert MongoDB shell syntax to extended JSON
     let converted_query = convert_shell_to_json(&query_json);
     
+    // Log the conversion for debugging
+    println!("Original query: {}", query_json);
+    println!("Converted query: {}", converted_query);
+    
     // Parse the query JSON
     let query_doc: serde_json::Value = match serde_json::from_str(&converted_query) {
         Ok(doc) => doc,
@@ -169,7 +181,7 @@ async fn execute_query(
             return Ok(QueryResult {
                 success: false,
                 data: None,
-                error: Some(format!("Invalid JSON: {}", e)),
+                error: Some(format!("Invalid JSON after conversion: {}. Converted query was: {}", e, converted_query)),
             });
         }
     };
