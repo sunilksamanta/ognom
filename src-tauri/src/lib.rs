@@ -86,11 +86,12 @@ async fn list_collections(
     Ok(collection_names)
 }
 
-// Execute a find query
+// Execute a raw MongoDB query/command
 #[tauri::command]
 async fn execute_query(
     database_name: String,
     collection_name: String,
+    query_type: String,
     query_json: String,
     state: State<'_, MongoState>,
 ) -> Result<QueryResult, String> {
@@ -99,50 +100,319 @@ async fn execute_query(
         .as_ref()
         .ok_or("Not connected to MongoDB")?;
     
+    let db = client.database(&database_name);
+    let collection = db.collection::<Document>(&collection_name);
+    
     // Parse the query JSON
-    let filter: Document = match serde_json::from_str(&query_json) {
+    let query_doc: serde_json::Value = match serde_json::from_str(&query_json) {
         Ok(doc) => doc,
         Err(e) => {
             return Ok(QueryResult {
                 success: false,
                 data: None,
-                error: Some(format!("Invalid JSON query: {}", e)),
+                error: Some(format!("Invalid JSON: {}", e)),
             });
         }
     };
     
-    let db = client.database(&database_name);
-    let collection = db.collection::<Document>(&collection_name);
-    
-    // Execute the query
-    match collection.find(filter).await {
-        Ok(mut cursor) => {
-            let mut results = Vec::new();
+    // Execute based on query type
+    match query_type.as_str() {
+        "find" => {
+            let filter: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid filter: {}", e))?;
             
-            use futures::stream::TryStreamExt;
-            while let Some(doc) = cursor.try_next().await.map_err(|e| format!("Cursor error: {}", e))? {
-                match serde_json::to_string_pretty(&doc) {
-                    Ok(json_str) => results.push(json_str),
-                    Err(e) => {
-                        return Ok(QueryResult {
+            match collection.find(filter).await {
+                Ok(mut cursor) => {
+                    let mut results = Vec::new();
+                    use futures::stream::TryStreamExt;
+                    while let Some(doc) = cursor.try_next().await
+                        .map_err(|e| format!("Cursor error: {}", e))? {
+                        if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
+                            results.push(json_str);
+                        }
+                    }
+                    Ok(QueryResult {
+                        success: true,
+                        data: Some(results),
+                        error: None,
+                    })
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Find failed: {}", e)),
+                }),
+            }
+        }
+        "findOne" => {
+            let filter: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid filter: {}", e))?;
+            
+            match collection.find_one(filter).await {
+                Ok(Some(doc)) => {
+                    if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
                             success: false,
                             data: None,
-                            error: Some(format!("Failed to serialize document: {}", e)),
-                        });
+                            error: Some("Failed to serialize result".to_string()),
+                        })
                     }
                 }
+                Ok(None) => Ok(QueryResult {
+                    success: true,
+                    data: Some(vec![]),
+                    error: None,
+                }),
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("FindOne failed: {}", e)),
+                }),
             }
-            
-            Ok(QueryResult {
-                success: true,
-                data: Some(results),
-                error: None,
-            })
         }
-        Err(e) => Ok(QueryResult {
+        "aggregate" => {
+            let pipeline: Vec<Document> = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid pipeline: {}", e))?;
+            
+            match collection.aggregate(pipeline).await {
+                Ok(mut cursor) => {
+                    let mut results = Vec::new();
+                    use futures::stream::TryStreamExt;
+                    while let Some(doc) = cursor.try_next().await
+                        .map_err(|e| format!("Cursor error: {}", e))? {
+                        if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
+                            results.push(json_str);
+                        }
+                    }
+                    Ok(QueryResult {
+                        success: true,
+                        data: Some(results),
+                        error: None,
+                    })
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Aggregate failed: {}", e)),
+                }),
+            }
+        }
+        "insertOne" => {
+            let document: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid document: {}", e))?;
+            
+            match collection.insert_one(document).await {
+                Ok(result) => {
+                    let result_json = serde_json::json!({
+                        "insertedId": result.inserted_id.to_string(),
+                        "acknowledged": true
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("InsertOne failed: {}", e)),
+                }),
+            }
+        }
+        "insertMany" => {
+            let documents: Vec<Document> = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid documents array: {}", e))?;
+            
+            match collection.insert_many(documents).await {
+                Ok(result) => {
+                    let ids: Vec<String> = result.inserted_ids.values()
+                        .map(|id| id.to_string())
+                        .collect();
+                    let result_json = serde_json::json!({
+                        "insertedIds": ids,
+                        "insertedCount": ids.len(),
+                        "acknowledged": true
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("InsertMany failed: {}", e)),
+                }),
+            }
+        }
+        "updateOne" | "updateMany" => {
+            let obj = query_doc.as_object()
+                .ok_or("Query must be an object with 'filter' and 'update' fields")?;
+            
+            let filter: Document = serde_json::from_value(
+                obj.get("filter").cloned().unwrap_or(serde_json::json!({}))
+            ).map_err(|e| format!("Invalid filter: {}", e))?;
+            
+            let update: Document = serde_json::from_value(
+                obj.get("update").cloned()
+                    .ok_or("Missing 'update' field")?
+            ).map_err(|e| format!("Invalid update: {}", e))?;
+            
+            let result = if query_type == "updateOne" {
+                collection.update_one(filter, update).await
+            } else {
+                collection.update_many(filter, update).await
+            };
+            
+            match result {
+                Ok(update_result) => {
+                    let result_json = serde_json::json!({
+                        "matchedCount": update_result.matched_count,
+                        "modifiedCount": update_result.modified_count,
+                        "upsertedId": update_result.upserted_id.map(|id| id.to_string()),
+                        "acknowledged": true
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("{} failed: {}", query_type, e)),
+                }),
+            }
+        }
+        "deleteOne" => {
+            let filter: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid filter: {}", e))?;
+            
+            match collection.delete_one(filter).await {
+                Ok(result) => {
+                    let result_json = serde_json::json!({
+                        "deletedCount": result.deleted_count,
+                        "acknowledged": true
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("DeleteOne failed: {}", e)),
+                }),
+            }
+        }
+        "deleteMany" => {
+            let filter: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid filter: {}", e))?;
+            
+            match collection.delete_many(filter).await {
+                Ok(result) => {
+                    let result_json = serde_json::json!({
+                        "deletedCount": result.deleted_count,
+                        "acknowledged": true
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("DeleteMany failed: {}", e)),
+                }),
+            }
+        }
+        "countDocuments" => {
+            let filter: Document = serde_json::from_value(query_doc)
+                .map_err(|e| format!("Invalid filter: {}", e))?;
+            
+            match collection.count_documents(filter).await {
+                Ok(count) => {
+                    let result_json = serde_json::json!({
+                        "count": count
+                    });
+                    if let Ok(json_str) = serde_json::to_string_pretty(&result_json) {
+                        Ok(QueryResult {
+                            success: true,
+                            data: Some(vec![json_str]),
+                            error: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            success: false,
+                            data: None,
+                            error: Some("Failed to serialize result".to_string()),
+                        })
+                    }
+                }
+                Err(e) => Ok(QueryResult {
+                    success: false,
+                    data: None,
+                    error: Some(format!("CountDocuments failed: {}", e)),
+                }),
+            }
+        }
+        _ => Ok(QueryResult {
             success: false,
             data: None,
-            error: Some(format!("Query execution failed: {}", e)),
+            error: Some(format!("Unknown query type: {}", query_type)),
         }),
     }
 }
