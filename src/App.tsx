@@ -15,6 +15,8 @@ import {
   FolderOpen,
   FileCode,
   BookOpen,
+  Link,
+  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +26,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonacoEditor } from "@/components/MonacoEditor";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface SavedConnection {
   name: string;
@@ -38,6 +42,15 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  
+  // Manual connection fields
+  const [connectionMode, setConnectionMode] = useState<"uri" | "manual">("uri");
+  const [manualHost, setManualHost] = useState("localhost");
+  const [manualPort, setManualPort] = useState("27017");
+  const [manualDatabase, setManualDatabase] = useState("");
+  const [manualUsername, setManualUsername] = useState("");
+  const [manualPassword, setManualPassword] = useState("");
+  const [manualAuthDb, setManualAuthDb] = useState("admin");
 
   // Database and collection state
   const [databases, setDatabases] = useState<string[]>([]);
@@ -77,12 +90,39 @@ function App() {
     }
   }, []);
 
+  // Build connection string from manual inputs
+  const buildManualConnectionString = () => {
+    let uri = "mongodb://";
+    
+    if (manualUsername && manualPassword) {
+      uri += `${encodeURIComponent(manualUsername)}:${encodeURIComponent(manualPassword)}@`;
+    }
+    
+    uri += `${manualHost}:${manualPort}`;
+    
+    if (manualDatabase) {
+      uri += `/${manualDatabase}`;
+    }
+    
+    if (manualUsername && manualAuthDb) {
+      uri += `?authSource=${manualAuthDb}`;
+    }
+    
+    return uri;
+  };
+
   const handleConnect = async () => {
     try {
       setStatusMessage("Connecting...");
+      
+      // Use manual connection string if in manual mode
+      const finalConnectionString = connectionMode === "manual" 
+        ? buildManualConnectionString() 
+        : connectionString;
+      
       const result = await invoke<{ success: boolean; message: string }>(
         "connect_to_mongodb",
-        { connectionString }
+        { connectionString: finalConnectionString }
       );
 
       if (result.success) {
@@ -216,13 +256,15 @@ function App() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background dark">
+    <div className="h-screen w-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="border-b bg-card">
+      <header className="border-b bg-card shadow-sm">
         <div className="flex h-16 items-center px-6 gap-4">
           <div className="flex items-center gap-3">
-            <Database className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
+            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+              <Database className="h-6 w-6 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-foreground">
               Ognom
             </h1>
             <Badge variant="secondary" className="ml-2">MongoDB GUI</Badge>
@@ -231,11 +273,16 @@ function App() {
           <div className="flex-1" />
           
           <div className="flex items-center gap-3">
+            {statusMessage && (
+              <div className="text-sm text-muted-foreground px-3 py-1 bg-muted/50 rounded-md">
+                {statusMessage}
+              </div>
+            )}
             {isConnected ? (
               <>
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-sm text-muted-foreground">Connected</span>
+                <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-md">
+                  <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                  <span className="text-sm font-medium text-primary">Connected</span>
                 </div>
                 <Button onClick={handleDisconnect} variant="outline" size="sm">
                   Disconnect
@@ -249,74 +296,165 @@ function App() {
                     Connect to Database
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[525px]">
+                <DialogContent className="sm:max-w-[600px]">
                   <DialogHeader>
-                    <DialogTitle>Connect to MongoDB</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5 text-primary" />
+                      Connect to MongoDB
+                    </DialogTitle>
                     <DialogDescription>
-                      Enter your MongoDB connection details to get started.
+                      Choose your connection method and enter details to get started.
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Connection Name (optional)</label>
-                      <Input
-                        placeholder="My MongoDB Instance"
-                        value={connectionName}
-                        onChange={(e) => setConnectionName(e.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Connection String</label>
-                      <Input
-                        placeholder="mongodb://localhost:27017"
-                        value={connectionString}
-                        onChange={(e) => setConnectionString(e.target.value)}
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button onClick={handleConnect} className="flex-1">
-                        Connect
-                      </Button>
-                      <Button onClick={saveConnection} variant="outline">
-                        <Save className="mr-2 h-4 w-4" />
-                        Save
-                      </Button>
-                    </div>
-
-                    {savedConnections.length > 0 && (
-                      <>
-                        <Separator />
-                        <div className="space-y-2">
-                          <h4 className="text-sm font-medium">Saved Connections</h4>
-                          <ScrollArea className="h-32">
-                            {savedConnections.map((conn, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between p-2 hover:bg-accent rounded-md mb-1"
-                              >
-                                <button
-                                  onClick={() => loadConnection(conn)}
-                                  className="text-sm flex-1 text-left"
-                                >
-                                  {conn.name}
-                                </button>
-                                <Button
-                                  onClick={() => deleteConnection(index)}
-                                  variant="ghost"
-                                  size="sm"
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </div>
-                            ))}
-                          </ScrollArea>
+                  
+                  <Tabs value={connectionMode} onValueChange={(v) => setConnectionMode(v as "uri" | "manual")} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="uri" className="flex items-center gap-2">
+                        <Link className="h-4 w-4" />
+                        Connection URI
+                      </TabsTrigger>
+                      <TabsTrigger value="manual" className="flex items-center gap-2">
+                        <Settings className="h-4 w-4" />
+                        Manual Configuration
+                      </TabsTrigger>
+                    </TabsList>
+                    
+                    <TabsContent value="uri" className="space-y-4">
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Connection Name (optional)</label>
+                        <Input
+                          placeholder="My MongoDB Instance"
+                          value={connectionName}
+                          onChange={(e) => setConnectionName(e.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Connection String</label>
+                        <Input
+                          placeholder="mongodb://localhost:27017"
+                          value={connectionString}
+                          onChange={(e) => setConnectionString(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Example: mongodb://username:password@host:port/database
+                        </p>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="manual" className="space-y-4">
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Connection Name (optional)</label>
+                        <Input
+                          placeholder="My MongoDB Instance"
+                          value={connectionName}
+                          onChange={(e) => setConnectionName(e.target.value)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium">Host</label>
+                          <Input
+                            placeholder="localhost"
+                            value={manualHost}
+                            onChange={(e) => setManualHost(e.target.value)}
+                          />
                         </div>
-                      </>
-                    )}
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium">Port</label>
+                          <Input
+                            placeholder="27017"
+                            value={manualPort}
+                            onChange={(e) => setManualPort(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Database (optional)</label>
+                        <Input
+                          placeholder="admin"
+                          value={manualDatabase}
+                          onChange={(e) => setManualDatabase(e.target.value)}
+                        />
+                      </div>
+                      <Separator />
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium">Username (optional)</label>
+                          <Input
+                            placeholder="username"
+                            value={manualUsername}
+                            onChange={(e) => setManualUsername(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium">Password (optional)</label>
+                          <Input
+                            type="password"
+                            placeholder="password"
+                            value={manualPassword}
+                            onChange={(e) => setManualPassword(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm font-medium">Auth Database</label>
+                        <Input
+                          placeholder="admin"
+                          value={manualAuthDb}
+                          onChange={(e) => setManualAuthDb(e.target.value)}
+                        />
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                  
+                  <div className="flex gap-2">
+                    <Button onClick={handleConnect} className="flex-1">
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Connect
+                    </Button>
+                    <Button onClick={saveConnection} variant="outline">
+                      <Save className="mr-2 h-4 w-4" />
+                      Save
+                    </Button>
                   </div>
+
+                  {savedConnections.length > 0 && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium flex items-center gap-2">
+                          <FolderOpen className="h-4 w-4" />
+                          Saved Connections
+                        </h4>
+                        <ScrollArea className="h-32">
+                          {savedConnections.map((conn, index) => (
+                            <div
+                              key={index}
+                              className="flex items-center justify-between p-2 hover:bg-accent/50 rounded-md mb-1 transition-colors"
+                            >
+                              <button
+                                onClick={() => loadConnection(conn)}
+                                className="text-sm flex-1 text-left font-medium hover:text-primary transition-colors"
+                              >
+                                {conn.name}
+                              </button>
+                              <Button
+                                onClick={() => deleteConnection(index)}
+                                variant="ghost"
+                                size="sm"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                        </ScrollArea>
+                      </div>
+                    </>
+                  )}
                 </DialogContent>
               </Dialog>
             )}
+            <ThemeToggle />
           </div>
         </div>
       </header>
@@ -325,10 +463,10 @@ function App() {
       {isConnected ? (
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar - Databases & Collections */}
-          <aside className="w-80 border-r bg-card flex flex-col">
-            <div className="p-4 border-b">
-              <h2 className="font-semibold flex items-center gap-2">
-                <FolderOpen className="h-4 w-4" />
+          <aside className="w-80 border-r bg-card flex flex-col shadow-sm">
+            <div className="p-4 border-b bg-primary/5">
+              <h2 className="font-semibold flex items-center gap-2 text-foreground">
+                <FolderOpen className="h-4 w-4 text-primary" />
                 Databases
               </h2>
             </div>
@@ -338,14 +476,14 @@ function App() {
                   <div key={db} className="mb-1">
                     <button
                       onClick={() => toggleDatabase(db)}
-                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent rounded-md text-sm transition-colors"
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-primary/10 rounded-md text-sm transition-colors font-medium"
                     >
                       {expandedDatabases.has(db) ? (
-                        <ChevronDown className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4 text-primary" />
                       ) : (
-                        <ChevronRight className="h-4 w-4" />
+                        <ChevronRight className="h-4 w-4 text-primary" />
                       )}
-                      <Database className="h-4 w-4 text-blue-500" />
+                      <Database className="h-4 w-4 text-primary" />
                       <span className="flex-1 text-left">{db}</span>
                     </button>
                     {expandedDatabases.has(db) && selectedDatabase === db && (
@@ -356,8 +494,8 @@ function App() {
                             onClick={() => handleCollectionClick(col)}
                             className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors ${
                               selectedCollection === col
-                                ? "bg-primary text-primary-foreground"
-                                : "hover:bg-accent"
+                                ? "bg-primary text-white font-medium"
+                                : "hover:bg-secondary/30"
                             }`}
                           >
                             <Table className="h-4 w-4" />
@@ -373,22 +511,24 @@ function App() {
           </aside>
 
           {/* Main Panel - Query & Results */}
-          <main className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 flex flex-col overflow-hidden bg-muted/30">
             {selectedCollection ? (
               <>
                 {/* Query Editor */}
-                <div className="border-b bg-card p-4">
+                <div className="border-b bg-card p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <FileCode className="h-5 w-5 text-primary" />
+                      <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center">
+                        <FileCode className="h-4 w-4 text-primary" />
+                      </div>
                       <h3 className="font-semibold">
                         Query Editor
                       </h3>
-                      <Badge variant="outline">
+                      <Badge variant="outline" className="border-primary/30 text-primary">
                         {selectedDatabase}.{selectedCollection}
                       </Badge>
                     </div>
-                    <Button onClick={executeQuery} disabled={isExecuting}>
+                    <Button onClick={executeQuery} disabled={isExecuting} className="shadow-sm">
                       {isExecuting ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -492,17 +632,19 @@ function App() {
           </main>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center">
-          <Card className="w-[450px]">
+        <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-primary/5 via-secondary/5 to-accent/5">
+          <Card className="w-[450px] shadow-xl border-primary/20">
             <CardHeader className="text-center">
-              <Database className="h-16 w-16 mx-auto mb-4 text-primary" />
-              <CardTitle className="text-2xl">Welcome to Ognom</CardTitle>
-              <CardDescription>
-                A beautiful MongoDB GUI client. Connect to your database to get started.
+              <div className="h-20 w-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg">
+                <Database className="h-12 w-12 text-white" />
+              </div>
+              <CardTitle className="text-3xl font-bold">Welcome to Ognom</CardTitle>
+              <CardDescription className="text-base mt-2">
+                A beautiful MongoDB GUI client with a colorful interface. Connect to your database to get started.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex justify-center">
-              <Button onClick={() => setShowConnectionModal(true)} size="lg">
+            <CardContent className="flex justify-center pb-6">
+              <Button onClick={() => setShowConnectionModal(true)} size="lg" className="shadow-lg">
                 <PlusCircle className="mr-2 h-5 w-5" />
                 Connect to Database
               </Button>
@@ -513,15 +655,15 @@ function App() {
 
       {/* Status Bar */}
       {statusMessage && (
-        <footer className="border-t bg-card px-6 py-2 flex items-center gap-2">
+        <footer className="border-t bg-card/95 backdrop-blur-sm px-6 py-2 flex items-center gap-2 shadow-sm">
           {statusMessage.startsWith("✓") ? (
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <CheckCircle2 className="h-4 w-4 text-primary" />
           ) : statusMessage.startsWith("✗") ? (
             <XCircle className="h-4 w-4 text-destructive" />
           ) : (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
           )}
-          <span className="text-sm">{statusMessage}</span>
+          <span className="text-sm font-medium">{statusMessage}</span>
         </footer>
       )}
     </div>
