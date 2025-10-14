@@ -171,9 +171,31 @@ function App() {
     setStatusMessage("Connection saved!");
   };
 
-  const loadConnection = (connection: SavedConnection) => {
+  const loadConnection = async (connection: SavedConnection) => {
     setConnectionString(connection.connectionString);
-    setStatusMessage(`Loaded: ${connection.name}`);
+    setConnectionName(connection.name);
+    setConnectionMode("uri");
+    setStatusMessage(`Loading: ${connection.name}...`);
+    
+    // Automatically connect after loading
+    try {
+      const result = await invoke<{ success: boolean; message: string }>(
+        "connect_to_mongodb",
+        { connectionString: connection.connectionString }
+      );
+
+      if (result.success) {
+        setIsConnected(true);
+        setStatusMessage(result.message);
+        setShowConnectionModal(false);
+        await loadDatabases();
+      } else {
+        setStatusMessage(`Error: ${result.message}`);
+      }
+    } catch (error) {
+      setStatusMessage(`Error: ${error}`);
+      setIsConnected(false);
+    }
   };
 
   const deleteConnection = (index: number) => {
