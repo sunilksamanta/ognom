@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tauri::{Manager, State};
 use std::sync::Arc;
+use regex::Regex;
+use chrono::Utc;
 
 // State to hold our MongoDB client
 struct MongoState {
@@ -20,6 +22,60 @@ struct QueryResult {
     success: bool,
     data: Option<Vec<String>>,
     error: Option<String>,
+}
+
+// Convert MongoDB shell syntax to extended JSON
+fn convert_shell_to_json(input: &str) -> String {
+    let mut result = input.to_string();
+    
+    // Convert ObjectId("...") to {"$oid": "..."}
+    let oid_regex = Regex::new(r#"ObjectId\s*\(\s*["']([a-fA-F0-9]{24})["']\s*\)"#).unwrap();
+    result = oid_regex.replace_all(&result, r#"{"$oid":"$1"}"#).to_string();
+    
+    // Convert ISODate("...") to {"$date": "..."}
+    let date_regex = Regex::new(r#"ISODate\s*\(\s*["']([^"']+)["']\s*\)"#).unwrap();
+    result = date_regex.replace_all(&result, r#"{"$date":"$1"}"#).to_string();
+    
+    // Convert ISODate() (no args) to current date
+    let date_now_regex = Regex::new(r#"ISODate\s*\(\s*\)"#).unwrap();
+    let now = Utc::now().to_rfc3339();
+    result = date_now_regex.replace_all(&result, &format!(r#"{{"$date":"{}"}}"#, now)).to_string();
+    
+    result
+}
+
+// Convert extended JSON to MongoDB shell format for display
+fn convert_json_to_shell(json_str: &str) -> String {
+    let mut result = json_str.to_string();
+    
+    // Convert {"$oid": "..."} to ObjectId("...")
+    let oid_regex = Regex::new(r#"\{\s*"\$oid"\s*:\s*"([a-fA-F0-9]{24})"\s*\}"#).unwrap();
+    result = oid_regex.replace_all(&result, r#"ObjectId("$1")"#).to_string();
+    
+    // Convert date with $numberLong to ISODate
+    let date_long_regex = Regex::new(
+        r#"\{\s*"\$date"\s*:\s*\{\s*"\$numberLong"\s*:\s*"(\d+)"\s*\}\s*\}"#
+    ).unwrap();
+    
+    for cap in date_long_regex.captures_iter(&json_str) {
+        if let Some(millis_str) = cap.get(1) {
+            if let Ok(millis) = millis_str.as_str().parse::<i64>() {
+                // Convert milliseconds to chrono DateTime
+                use chrono::{DateTime as ChronoDateTime, TimeZone};
+                if let Some(dt) = chrono::Utc.timestamp_millis_opt(millis).single() {
+                    let iso_str = dt.to_rfc3339();
+                    let old_str = cap.get(0).unwrap().as_str();
+                    result = result.replace(old_str, &format!(r#"ISODate("{}")"#, iso_str));
+                }
+            }
+        }
+    }
+    
+    // Convert simple {"$date": "..."} to ISODate("...")
+    let date_simple_regex = Regex::new(r#"\{\s*"\$date"\s*:\s*"([^"]+)"\s*\}"#).unwrap();
+    result = date_simple_regex.replace_all(&result, r#"ISODate("$1")"#).to_string();
+    
+    result
 }
 
 // Connect to MongoDB
@@ -103,8 +159,11 @@ async fn execute_query(
     let db = client.database(&database_name);
     let collection = db.collection::<Document>(&collection_name);
     
+    // Convert MongoDB shell syntax to extended JSON
+    let converted_query = convert_shell_to_json(&query_json);
+    
     // Parse the query JSON
-    let query_doc: serde_json::Value = match serde_json::from_str(&query_json) {
+    let query_doc: serde_json::Value = match serde_json::from_str(&converted_query) {
         Ok(doc) => doc,
         Err(e) => {
             return Ok(QueryResult {
@@ -128,7 +187,8 @@ async fn execute_query(
                     while let Some(doc) = cursor.try_next().await
                         .map_err(|e| format!("Cursor error: {}", e))? {
                         if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
-                            results.push(json_str);
+                            // Convert to MongoDB shell format
+                            results.push(convert_json_to_shell(&json_str));
                         }
                     }
                     Ok(QueryResult {
@@ -153,7 +213,7 @@ async fn execute_query(
                     if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
                         Ok(QueryResult {
                             success: true,
-                            data: Some(vec![json_str]),
+                            data: Some(vec![convert_json_to_shell(&json_str)]),
                             error: None,
                         })
                     } else {
@@ -187,7 +247,8 @@ async fn execute_query(
                     while let Some(doc) = cursor.try_next().await
                         .map_err(|e| format!("Cursor error: {}", e))? {
                         if let Ok(json_str) = serde_json::to_string_pretty(&doc) {
-                            results.push(json_str);
+                            // Convert to MongoDB shell format
+                            results.push(convert_json_to_shell(&json_str));
                         }
                     }
                     Ok(QueryResult {

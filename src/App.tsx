@@ -68,13 +68,13 @@ function App() {
   // Query examples for different operations
   const queryExamples: Record<string, string> = {
     find: '{\n\n}',
-    findOne: '{\n  "email": "john@example.com"\n}',
+    findOne: '{\n  "_id": ObjectId("507f1f77bcf86cd799439011")\n}',
     aggregate: '[\n  { "$match": { "status": "active" } },\n  { "$group": { "_id": "$category", "total": { "$sum": 1 } } }\n]',
-    insertOne: '{\n  "name": "John Doe",\n  "email": "john@example.com",\n  "age": 30\n}',
-    insertMany: '[\n  { "name": "John", "age": 30 },\n  { "name": "Jane", "age": 25 }\n]',
-    updateOne: '{\n  "filter": { "name": "John" },\n  "update": { "$set": { "age": 31 } }\n}',
-    updateMany: '{\n  "filter": { "status": "pending" },\n  "update": { "$set": { "status": "active" } }\n}',
-    deleteOne: '{\n  "name": "John"\n}',
+    insertOne: '{\n  "name": "John Doe",\n  "email": "john@example.com",\n  "age": 30,\n  "createdAt": ISODate()\n}',
+    insertMany: '[\n  { "name": "John", "age": 30, "createdAt": ISODate() },\n  { "name": "Jane", "age": 25, "createdAt": ISODate() }\n]',
+    updateOne: '{\n  "filter": { "_id": ObjectId("507f1f77bcf86cd799439011") },\n  "update": { "$set": { "age": 31, "updatedAt": ISODate() } }\n}',
+    updateMany: '{\n  "filter": { "status": "pending" },\n  "update": { "$set": { "status": "active", "updatedAt": ISODate() } }\n}',
+    deleteOne: '{\n  "_id": ObjectId("507f1f77bcf86cd799439011")\n}',
     deleteMany: '{\n  "status": "inactive"\n}',
     countDocuments: '{\n  "status": "active"\n}',
   };
