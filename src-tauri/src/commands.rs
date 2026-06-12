@@ -100,9 +100,24 @@ pub struct SecurityInfo {
 }
 
 async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppResult<(Client, ConnectionInfo)> {
-    let mut options = ClientOptions::parse(uri)
-        .await
-        .map_err(|e| AppError::Mongo(format!("invalid connection string: {}", *e.kind)))?;
+    let mut options = match ClientOptions::parse(uri).await {
+        Ok(opts) => opts,
+        Err(first) => {
+            // Common cause: an unescaped '@' or ':' in a pasted password.
+            // Retry once with the userinfo percent-encoded.
+            match crate::profiles::repair_userinfo(uri) {
+                Some(fixed) => ClientOptions::parse(&fixed).await.map_err(|_| {
+                    AppError::Mongo(format!("invalid connection string: {}", *first.kind))
+                })?,
+                None => {
+                    return Err(AppError::Mongo(format!(
+                        "invalid connection string: {}",
+                        *first.kind
+                    )))
+                }
+            }
+        }
+    };
     options.app_name.get_or_insert_with(|| format!("Ognom {}", env!("CARGO_PKG_VERSION")));
     options.connect_timeout.get_or_insert(Duration::from_secs(10));
     options.server_selection_timeout.get_or_insert(Duration::from_secs(8));

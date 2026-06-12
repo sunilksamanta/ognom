@@ -108,7 +108,7 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
           </DialogHeader>
 
           {view === "list" ? (
-            <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 flex-col gap-3">
               <div className="flex gap-2">
                 {profiles.length > 4 && (
                   <Input
@@ -131,8 +131,8 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                 </Button>
               </div>
 
-              <ScrollArea className="max-h-[420px]">
-                <div className="flex flex-col gap-2 pr-1">
+              <ScrollArea className="min-w-0 max-h-[420px]">
+                <div className="flex min-w-0 flex-col gap-2 pr-1">
                   {filtered.length === 0 && (
                     <p className="py-8 text-center text-sm text-muted-foreground">
                       {profiles.length === 0 ? "No saved connections yet." : "No matches."}
@@ -146,7 +146,7 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                       onClick={() => void handleConnect(p)}
                       onKeyDown={(e) => e.key === "Enter" && void handleConnect(p)}
                       className={cn(
-                        "group flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors",
+                        "group flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors",
                         "hover:border-primary/40 hover:bg-accent/50",
                         connectingId === p.id && "border-primary/50"
                       )}

@@ -18,6 +18,71 @@ pub fn pct_encode(s: &str) -> String {
     out
 }
 
+/// Percent-encode, but leave already-valid `%XX` escapes untouched so we never
+/// double-encode a password the user already encoded.
+fn pct_encode_preserving(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%'
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_hexdigit()
+            && bytes[i + 2].is_ascii_hexdigit()
+        {
+            out.push_str(&s[i..i + 3]);
+            i += 3;
+            continue;
+        }
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Repair a pasted connection URI whose userinfo has unescaped reserved
+/// characters — the classic "my password contains `@`" paste. Re-encodes only
+/// the `user:pass` segment and returns the fixed URI, or `None` if there's no
+/// userinfo to fix. The host has no `@`, so the last `@` before the path is the
+/// real separator even when the password itself contains `@`.
+pub fn repair_userinfo(uri: &str) -> Option<String> {
+    let scheme_end = uri.find("://")?;
+    let scheme = &uri[..scheme_end];
+    let after = &uri[scheme_end + 3..];
+
+    // Keep any ?query aside so an '@' inside query params can't confuse us.
+    let (head, query) = match after.split_once('?') {
+        Some((h, q)) => (h, Some(q)),
+        None => (after, None),
+    };
+
+    let at = head.rfind('@')?;
+    let userinfo = &head[..at];
+    let hostpath = &head[at + 1..];
+
+    // user:pass — split on the FIRST ':' so colons in the password survive.
+    let new_userinfo = match userinfo.split_once(':') {
+        Some((user, pass)) => {
+            format!("{}:{}", pct_encode_preserving(user), pct_encode_preserving(pass))
+        }
+        None => pct_encode_preserving(userinfo),
+    };
+
+    let mut fixed = format!("{scheme}://{new_userinfo}@{hostpath}");
+    if let Some(q) = query {
+        fixed.push('?');
+        fixed.push_str(q);
+    }
+    // Only worth returning if it actually changed something.
+    (fixed != uri).then_some(fixed)
+}
+
 /// Structured connection fields. Everything here is non-secret; the password
 /// (or full URI for uri-kind profiles) is stored encrypted separately.
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -493,6 +558,42 @@ mod tests {
         assert_eq!(
             sanitize_uri("mongodb+srv://user:hunter2@c.mongodb.net/db?w=majority"),
             "mongodb+srv://user@c.mongodb.net/db?w=majority"
+        );
+    }
+
+    #[test]
+    fn repair_at_in_password() {
+        assert_eq!(
+            repair_userinfo("mongodb://admin:p@ss@host:27017/db").unwrap(),
+            "mongodb://admin:p%40ss@host:27017/db"
+        );
+    }
+
+    #[test]
+    fn repair_at_in_srv_password_with_query() {
+        assert_eq!(
+            repair_userinfo("mongodb+srv://u:a@b/c@cluster.mongodb.net/db?retryWrites=true").unwrap(),
+            "mongodb+srv://u:a%40b%2Fc@cluster.mongodb.net/db?retryWrites=true"
+        );
+    }
+
+    #[test]
+    fn repair_leaves_clean_uri_alone() {
+        assert!(repair_userinfo("mongodb://admin:simplepass@host:27017/db").is_none());
+        assert!(repair_userinfo("mongodb://host:27017/db").is_none());
+    }
+
+    #[test]
+    fn repair_preserves_existing_encoding() {
+        // already-encoded %40 must not become %2540
+        assert!(repair_userinfo("mongodb://admin:p%40ss@host/db").is_none());
+    }
+
+    #[test]
+    fn repair_colon_in_password() {
+        assert_eq!(
+            repair_userinfo("mongodb://user:pa:ss@host/db").unwrap(),
+            "mongodb://user:pa%3Ass@host/db"
         );
     }
 }
