@@ -8,6 +8,8 @@ import {
   ChartLine,
   ChartPie,
   Check,
+  Code2,
+  Copy,
   Database,
   Donut,
   Download,
@@ -145,6 +147,23 @@ const CHART_TYPES: { id: ChartType; icon: typeof BarChart3; label: string }[] = 
   { id: "pie", icon: ChartPie, label: "Pie" },
   { id: "donut", icon: Donut, label: "Donut" },
 ];
+
+/** Render the AI's plan as a copy-pastable mongosh statement. */
+function planToShell(plan: VizPlan, collection: string): string {
+  const coll = /^[A-Za-z_][\w]*$/.test(collection) ? `db.${collection}` : `db.getCollection("${collection}")`;
+  if (plan.kind === "aggregate" && plan.stages?.length) {
+    const stages = plan.stages
+      .map((s) => `  { ${s.op}: ${s.body.trim()} }`)
+      .join(",\n");
+    return `${coll}.aggregate([\n${stages}\n])`;
+  }
+  let out = `${coll}.find(${plan.filter?.trim() || "{}"}`;
+  if (plan.projection?.trim()) out += `, ${plan.projection.trim()}`;
+  out += ")";
+  if (plan.sort?.trim()) out += `.sort(${plan.sort.trim()})`;
+  out += `.limit(${Math.min(plan.limit ?? 100, 500)})`;
+  return out;
+}
 
 const SAMPLE_PROMPTS = [
   "Count documents grouped by status",
@@ -386,6 +405,7 @@ function VisualizeTab({
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"json" | "table">("table");
   const [chartType, setChartType] = useState<ChartType | null>(null);
+  const [showQuery, setShowQuery] = useState(false);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
   const chartRef = useRef<CanvasChartHandle>(null);
 
@@ -395,6 +415,7 @@ function VisualizeTab({
     if (p) setPrompt(p);
     setBusy(true);
     setError(null);
+    setShowQuery(false);
     try {
       const vizPlan = await generateVizPlan(text, database, collection, fields);
       setPlan(vizPlan);
@@ -483,14 +504,55 @@ function VisualizeTab({
       )}
 
       {plan && !error && (
-        <div className="mx-4 mt-3 flex shrink-0 items-center gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
-          <Bot className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="min-w-0 flex-1 truncate">{plan.explanation}</span>
-          <Badge variant="secondary" className="h-4 shrink-0 px-1 font-mono text-[10px]">
-            {plan.kind}
-          </Badge>
-          {execMs !== null && (
-            <span className="shrink-0 tabular-nums text-muted-foreground">{execMs}ms</span>
+        <div className="mx-4 mt-3 shrink-0 rounded-md border border-primary/25 bg-primary/5 text-xs">
+          <div className="flex items-center gap-2 px-3 py-2">
+            <Bot className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate">{plan.explanation}</span>
+            <Badge variant="secondary" className="h-4 shrink-0 px-1 font-mono text-[10px]">
+              {plan.kind}
+            </Badge>
+            {execMs !== null && (
+              <span className="shrink-0 tabular-nums text-muted-foreground">{execMs}ms</span>
+            )}
+            <button
+              onClick={() => setShowQuery((v) => !v)}
+              className="flex shrink-0 items-center gap-1 rounded-md border bg-card px-2 py-0.5 font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Code2 className="h-3 w-3" />
+              {showQuery ? "Hide query" : "View query"}
+            </button>
+          </div>
+          {showQuery && (
+            <div className="border-t border-primary/20 px-3 py-2.5">
+              <div className="flex items-start gap-2">
+                <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap rounded-md border bg-card p-2.5 font-mono text-[11px] leading-relaxed">
+                  {planToShell(plan, collection)}
+                </pre>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(planToShell(plan, collection));
+                    toast.success("Query copied");
+                  }}
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+              </div>
+              <p className="mt-2 leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">What it does: </span>
+                {plan.explanation}
+                {plan.chart && (
+                  <>
+                    {" "}
+                    Charted with <code className="font-mono">{plan.chart.labelField}</code> as
+                    labels and <code className="font-mono">{plan.chart.valueField}</code> as
+                    values.
+                  </>
+                )}
+              </p>
+            </div>
           )}
         </div>
       )}
