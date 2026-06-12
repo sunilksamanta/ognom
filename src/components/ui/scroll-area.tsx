@@ -12,7 +12,9 @@ const ScrollArea = React.forwardRef<
     className={cn("relative overflow-hidden", className)}
     {...props}
   >
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+    {/* radix sets display:table on the inner div, which breaks text truncation
+        and forces horizontal overflow — flatten it back to a block */}
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block [&>div]:w-full">
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />

@@ -45,7 +45,7 @@ export function WelcomeScreen() {
   const [managerOpen, setManagerOpen] = useState(false);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="app-gradient flex h-full flex-col overflow-x-hidden">
       {/* titlebar drag strip (overlay traffic lights on macOS) */}
       <div onMouseDown={dragWindow} className="flex h-10 shrink-0 items-center justify-end px-3">
         <ThemeToggle />
@@ -54,7 +54,7 @@ export function WelcomeScreen() {
       <div className="flex flex-1 items-center justify-center overflow-y-auto px-8 pb-12">
         <div className="grid w-full max-w-4xl gap-12 lg:grid-cols-[1.1fr_1fr]">
           {/* brand */}
-          <div onMouseDown={dragWindow} className="no-select flex flex-col justify-center gap-6">
+          <div onMouseDown={dragWindow} className="no-select flex min-w-0 flex-col justify-center gap-6">
             <OgnomMark className="h-16 w-16 drop-shadow-lg" />
             <div>
               <h1 className="text-4xl font-bold tracking-tight">Ognom</h1>
@@ -82,7 +82,7 @@ export function WelcomeScreen() {
           </div>
 
           {/* connections */}
-          <div className="flex flex-col justify-center gap-3">
+          <div className="flex min-w-0 flex-col justify-center gap-3">
             <div className="flex items-center justify-between">
               <h2 className="no-select text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 Connections

@@ -145,4 +145,70 @@
     -webkit-user-select: none;
     user-select: none;
   }
+
+  /* Soft emerald wash used on the welcome screen, empty states, splash. */
+  .app-gradient {
+    background-image:
+      radial-gradient(55% 45% at 18% 22%, hsl(var(--primary) / 0.07), transparent 65%),
+      radial-gradient(45% 40% at 85% 80%, hsl(var(--primary) / 0.05), transparent 60%);
+  }
+
+  .dark .app-gradient {
+    background-image:
+      radial-gradient(55% 45% at 18% 22%, hsl(var(--primary) / 0.1), transparent 65%),
+      radial-gradient(45% 40% at 85% 80%, hsl(var(--primary) / 0.07), transparent 60%);
+  }
+}
+
+/* ── splash screen ─────────────────────────────────────────────── */
+
+@keyframes splash-mark {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes splash-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes splash-glow {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.splash-mark {
+  animation: splash-mark 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.splash-rise {
+  animation: splash-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.splash-glow {
+  animation: splash-glow 0.9s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-mark,
+  .splash-rise,
+  .splash-glow {
+    animation: none;
+  }
 }

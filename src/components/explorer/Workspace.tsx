@@ -9,7 +9,7 @@ export function Workspace() {
 
   if (tabs.length === 0) {
     return (
-      <main className="flex flex-1 items-center justify-center bg-background">
+      <main className="app-gradient flex flex-1 items-center justify-center bg-background">
         <div className="no-select flex flex-col items-center gap-3 text-center text-muted-foreground">
           <MousePointerClick className="h-10 w-10 opacity-40" />
           <div>

@@ -16,6 +16,42 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
+
+            // macOS: add "About Ognom" and "Check for Updates…" to the
+            // system Help menu; both forward to the webview via menu-action.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItem, MenuItemKind, Submenu};
+                let handle = app.handle();
+                let menu = Menu::default(handle)?;
+                let about =
+                    MenuItem::with_id(handle, "about-ognom", "About Ognom", true, None::<&str>)?;
+                let updates = MenuItem::with_id(
+                    handle,
+                    "check-updates",
+                    "Check for Updates…",
+                    true,
+                    None::<&str>,
+                )?;
+                let help = menu.items()?.into_iter().find_map(|item| match item {
+                    MenuItemKind::Submenu(s)
+                        if s.text().map(|t| t == "Help").unwrap_or(false) =>
+                    {
+                        Some(s)
+                    }
+                    _ => None,
+                });
+                match help {
+                    Some(submenu) => submenu.prepend_items(&[&about, &updates])?,
+                    None => {
+                        let submenu =
+                            Submenu::with_items(handle, "Help", true, &[&about, &updates])?;
+                        menu.append(&submenu)?;
+                    }
+                }
+                app.set_menu(menu)?;
+            }
+
             let data_dir = app.path().app_data_dir()?;
             let (crypto, degraded) = crypto::Crypto::init(&data_dir)
                 .map_err(|e| format!("could not initialize secret storage: {e}"))?;
@@ -29,6 +65,13 @@ pub fn run() {
                 degraded: std::sync::atomic::AtomicBool::new(degraded),
             });
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            use tauri::Emitter;
+            let id = event.id().0.as_str();
+            if id == "about-ognom" || id == "check-updates" {
+                let _ = app.emit("menu-action", id.to_string());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::security_info,

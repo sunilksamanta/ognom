@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
   Database,
   Eye,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Search,
   Table2,
@@ -15,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useExplorer } from "@/stores/explorer";
+import { SIDEBAR_MAX, SIDEBAR_MIN, useSettings } from "@/stores/settings";
 import { formatBytes } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +42,10 @@ export function Sidebar() {
     activeTabId,
   } = useExplorer();
 
+  const { sidebarWidth, sidebarCollapsed, setSidebarWidth, toggleSidebar } = useSettings();
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const dragging = useRef(false);
+
   useEffect(() => {
     if (databases.length === 0) void loadDatabases();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,10 +59,52 @@ export function Sidebar() {
     return (collections[db.name] ?? []).some((c) => c.name.toLowerCase().includes(filter));
   });
 
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const clamp = (w: number) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w));
+    const onMove = (ev: MouseEvent) => setLiveWidth(clamp(startWidth + ev.clientX - startX));
+    const onUp = (ev: MouseEvent) => {
+      dragging.current = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setSidebarWidth(clamp(startWidth + ev.clientX - startX));
+      setLiveWidth(null);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  if (sidebarCollapsed) {
+    return (
+      <aside className="no-select flex w-10 shrink-0 flex-col items-center border-r bg-card py-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleSidebar}>
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Expand sidebar (⌘B)</TooltipContent>
+        </Tooltip>
+        <Database className="mt-3 h-3.5 w-3.5 text-muted-foreground/50" />
+      </aside>
+    );
+  }
+
   return (
-    <aside className="no-select flex w-64 shrink-0 flex-col border-r bg-card">
-      <div className="flex items-center gap-1.5 border-b px-3 py-2">
-        <div className="relative flex-1">
+    <aside
+      className="no-select relative flex shrink-0 flex-col border-r bg-card"
+      style={{ width: liveWidth ?? sidebarWidth }}
+    >
+      <div className="flex items-center gap-1 border-b px-2 py-2">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={sidebarFilter}
@@ -80,6 +129,14 @@ export function Sidebar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent>Refresh databases</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={toggleSidebar}>
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Collapse sidebar (⌘B)</TooltipContent>
         </Tooltip>
       </div>
 
@@ -152,6 +209,14 @@ export function Sidebar() {
           })}
         </div>
       </ScrollArea>
+
+      {/* resize handle */}
+      <div
+        onMouseDown={startResize}
+        onDoubleClick={() => setSidebarWidth(256)}
+        title="Drag to resize · double-click to reset"
+        className="absolute -right-px inset-y-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/50 active:bg-primary/70"
+      />
     </aside>
   );
 }
