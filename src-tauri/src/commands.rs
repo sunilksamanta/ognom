@@ -663,6 +663,345 @@ pub async fn collection_stats(
 }
 
 // ---------------------------------------------------------------------------
+// explain
+// ---------------------------------------------------------------------------
+
+/// Run an explain (queryPlanner verbosity) for a find or an aggregate and
+/// return a compact, UI-friendly summary plus the raw plan.
+#[tauri::command]
+pub async fn explain_query(
+    database: String,
+    collection: String,
+    filter: String,
+    sort: String,
+    projection: String,
+    pipeline_stages: Option<Vec<StageInput>>,
+    verbosity: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let db = client.database(&database);
+    let verbosity = verbosity.unwrap_or_else(|| "executionStats".into());
+
+    let explain = if let Some(stages) = pipeline_stages {
+        let mut pipeline: Vec<Document> = Vec::with_capacity(stages.len());
+        for (i, stage) in stages.iter().enumerate() {
+            let body = shell::parse_value(&stage.body)
+                .map_err(|e| AppError::Parse(format!("stage {} ({}): {e}", i + 1, stage.op)))?;
+            let mut d = Document::new();
+            d.insert(stage.op.clone(), to_bson(&body)?);
+            pipeline.push(d);
+        }
+        doc! {
+            "explain": {
+                "aggregate": &collection,
+                "pipeline": pipeline,
+                "cursor": {},
+            },
+            "verbosity": &verbosity,
+        }
+    } else {
+        let mut find_cmd = doc! { "find": &collection, "filter": parse_doc_text(&filter)? };
+        let sort = parse_doc_text(&sort)?;
+        let projection = parse_doc_text(&projection)?;
+        if !sort.is_empty() {
+            find_cmd.insert("sort", sort);
+        }
+        if !projection.is_empty() {
+            find_cmd.insert("projection", projection);
+        }
+        doc! { "explain": find_cmd, "verbosity": &verbosity }
+    };
+
+    let raw = db.run_command(explain).await?;
+    Ok(doc_to_value(summarize_explain(&raw)))
+}
+
+/// Pull the headline numbers out of a (possibly nested / sharded) explain plan.
+fn summarize_explain(raw: &Document) -> Document {
+    fn winning(raw: &Document) -> Option<&Document> {
+        raw.get_document("queryPlanner").ok()?.get_document("winningPlan").ok()
+    }
+    // Walk a plan tree collecting the stage names and any index name.
+    fn walk(plan: &Document, stages: &mut Vec<String>, index: &mut Option<String>) {
+        if let Ok(stage) = plan.get_str("stage") {
+            stages.push(stage.to_string());
+        }
+        if index.is_none() {
+            if let Ok(kp) = plan.get_document("keyPattern") {
+                *index = plan
+                    .get_str("indexName")
+                    .ok()
+                    .map(String::from)
+                    .or_else(|| Some(Bson::Document(kp.clone()).into_relaxed_extjson().to_string()));
+            }
+        }
+        for key in ["inputStage", "inputStages"] {
+            match plan.get(key) {
+                Some(Bson::Document(d)) => walk(d, stages, index),
+                Some(Bson::Array(arr)) => {
+                    for v in arr {
+                        if let Bson::Document(d) = v {
+                            walk(d, stages, index);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let exec = raw.get_document("executionStats").ok();
+    let mut stages = Vec::new();
+    let mut index = None;
+    if let Some(plan) = winning(raw) {
+        walk(plan, &mut stages, &mut index);
+    }
+    let collscan = stages.iter().any(|s| s == "COLLSCAN");
+
+    doc! {
+        "indexName": index,
+        "stages": stages,
+        "isCollectionScan": collscan,
+        "nReturned": exec.and_then(|e| e.get_i64("nReturned").ok().or(e.get_i32("nReturned").ok().map(i64::from))),
+        "totalDocsExamined": exec.and_then(|e| e.get_i64("totalDocsExamined").ok().or(e.get_i32("totalDocsExamined").ok().map(i64::from))),
+        "totalKeysExamined": exec.and_then(|e| e.get_i64("totalKeysExamined").ok().or(e.get_i32("totalKeysExamined").ok().map(i64::from))),
+        "executionTimeMillis": exec.and_then(|e| e.get_i64("executionTimeMillis").ok().or(e.get_i32("executionTimeMillis").ok().map(i64::from))),
+        "raw": raw.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// schema analysis
+// ---------------------------------------------------------------------------
+
+/// Sample documents and infer, per (dotted) field path, the BSON types seen,
+/// how many docs contain it, and a couple of example values.
+#[tauri::command]
+pub async fn analyze_schema(
+    database: String,
+    collection: String,
+    sample_size: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let sample_size = sample_size.unwrap_or(1000).clamp(10, 10_000);
+
+    let cursor = coll
+        .aggregate(vec![doc! { "$sample": { "size": sample_size } }])
+        .await?;
+    let docs: Vec<Document> = cursor.try_collect().await?;
+    let sampled = docs.len() as i64;
+
+    use std::collections::BTreeMap;
+    struct FieldAcc {
+        present: i64,
+        types: BTreeMap<String, i64>,
+        examples: Vec<Value>,
+    }
+    let mut fields: BTreeMap<String, FieldAcc> = BTreeMap::new();
+
+    fn type_name(b: &Bson) -> &'static str {
+        match b {
+            Bson::Double(_) => "double",
+            Bson::String(_) => "string",
+            Bson::Array(_) => "array",
+            Bson::Document(_) => "object",
+            Bson::Boolean(_) => "bool",
+            Bson::Null => "null",
+            Bson::RegularExpression(_) => "regex",
+            Bson::Int32(_) => "int",
+            Bson::Int64(_) => "long",
+            Bson::Timestamp(_) => "timestamp",
+            Bson::Binary(_) => "binary",
+            Bson::ObjectId(_) => "objectId",
+            Bson::DateTime(_) => "date",
+            Bson::Decimal128(_) => "decimal",
+            _ => "other",
+        }
+    }
+
+    fn visit(prefix: &str, doc: &Document, fields: &mut BTreeMap<String, FieldAcc>) {
+        for (k, v) in doc {
+            let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+            let acc = fields.entry(path.clone()).or_insert_with(|| FieldAcc {
+                present: 0,
+                types: BTreeMap::new(),
+                examples: Vec::new(),
+            });
+            acc.present += 1;
+            *acc.types.entry(type_name(v).to_string()).or_insert(0) += 1;
+            if acc.examples.len() < 3 && !matches!(v, Bson::Document(_) | Bson::Array(_)) {
+                acc.examples.push(v.clone().into_relaxed_extjson());
+            }
+            if let Bson::Document(sub) = v {
+                visit(&path, sub, fields);
+            }
+        }
+    }
+
+    for d in &docs {
+        visit("", d, &mut fields);
+    }
+
+    let result: Vec<Value> = fields
+        .into_iter()
+        .map(|(path, acc)| {
+            let mut types: Vec<Value> = acc
+                .types
+                .into_iter()
+                .map(|(t, n)| json!({ "type": t, "count": n }))
+                .collect();
+            types.sort_by_key(|v| -(v.get("count").and_then(|c| c.as_i64()).unwrap_or(0)));
+            json!({
+                "path": path,
+                "present": acc.present,
+                "coverage": if sampled > 0 { acc.present as f64 / sampled as f64 } else { 0.0 },
+                "types": types,
+                "examples": acc.examples,
+            })
+        })
+        .collect();
+
+    Ok(json!({ "sampled": sampled, "fields": result }))
+}
+
+// ---------------------------------------------------------------------------
+// export / import
+// ---------------------------------------------------------------------------
+
+/// Export documents matching `filter` to `path` as JSON (array) or CSV.
+/// Returns the number of documents written.
+#[tauri::command]
+pub async fn export_collection(
+    database: String,
+    collection: String,
+    filter: String,
+    sort: String,
+    format: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    use std::io::Write;
+
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let filter = parse_doc_text(&filter)?;
+    let sort = parse_doc_text(&sort)?;
+
+    let mut find = coll.find(filter);
+    if !sort.is_empty() {
+        find = find.sort(sort);
+    }
+    let docs: Vec<Document> = find.await?.try_collect().await?;
+
+    let file = std::fs::File::create(&path)
+        .map_err(|e| AppError::Parse(format!("cannot write {path}: {e}")))?;
+    let mut w = std::io::BufWriter::new(file);
+    let count = docs.len() as u64;
+
+    if format == "csv" {
+        // Union of top-level keys across all docs, _id first.
+        let mut cols: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        if docs.iter().any(|d| d.contains_key("_id")) {
+            cols.push("_id".into());
+            seen.insert("_id".to_string());
+        }
+        for d in &docs {
+            for k in d.keys() {
+                if seen.insert(k.clone()) {
+                    cols.push(k.clone());
+                }
+            }
+        }
+        writeln!(w, "{}", cols.iter().map(|c| csv_escape(c)).collect::<Vec<_>>().join(","))?;
+        for d in &docs {
+            let row: Vec<String> = cols
+                .iter()
+                .map(|c| match d.get(c) {
+                    Some(b) => csv_escape(&bson_to_cell(b)),
+                    None => String::new(),
+                })
+                .collect();
+            writeln!(w, "{}", row.join(","))?;
+        }
+    } else {
+        // Pretty JSON array of relaxed extended JSON.
+        let arr: Vec<Value> = docs.into_iter().map(doc_to_value).collect();
+        let json = serde_json::to_string_pretty(&arr)
+            .map_err(|e| AppError::Parse(format!("serialize failed: {e}")))?;
+        w.write_all(json.as_bytes())?;
+    }
+    w.flush()?;
+    Ok(count)
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn bson_to_cell(b: &Bson) -> String {
+    match b {
+        Bson::String(s) => s.clone(),
+        Bson::Document(_) | Bson::Array(_) => Bson::clone(b).into_relaxed_extjson().to_string(),
+        Bson::ObjectId(o) => o.to_hex(),
+        Bson::Boolean(v) => v.to_string(),
+        Bson::Int32(v) => v.to_string(),
+        Bson::Int64(v) => v.to_string(),
+        Bson::Double(v) => v.to_string(),
+        Bson::Null => String::new(),
+        other => other.clone().into_relaxed_extjson().to_string(),
+    }
+}
+
+/// Import documents from a JSON file (array or newline-delimited) into a
+/// collection. Returns the number inserted.
+#[tauri::command]
+pub async fn import_documents(
+    database: String,
+    collection: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
+
+    // Accept either a JSON array or newline-delimited JSON (NDJSON).
+    let trimmed = text.trim_start();
+    let mut docs: Vec<Document> = Vec::new();
+    if trimmed.starts_with('[') {
+        let value = shell::parse_value(&text)?;
+        for v in value.as_array().ok_or_else(|| AppError::Parse("expected a JSON array".into()))? {
+            docs.push(to_doc(v)?);
+        }
+    } else {
+        for (i, line) in text.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v = shell::parse_value(line)
+                .map_err(|e| AppError::Parse(format!("line {}: {e}", i + 1)))?;
+            docs.push(to_doc(&v)?);
+        }
+    }
+
+    if docs.is_empty() {
+        return Err(AppError::Parse("no documents found in file".into()));
+    }
+    let n = docs.len() as u64;
+    coll.insert_many(docs).await?;
+    Ok(n)
+}
+
+// ---------------------------------------------------------------------------
 // shell execution
 // ---------------------------------------------------------------------------
 

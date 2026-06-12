@@ -16,6 +16,9 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
+            {
+                app.handle().plugin(tauri_plugin_dialog::init())?;
+            }
 
             // macOS: add "About Ognom" and "Check for Updates…" to the
             // system Help menu; both forward to the webview via menu-action.
@@ -95,6 +98,10 @@ pub fn run() {
             commands::create_index,
             commands::drop_index,
             commands::collection_stats,
+            commands::explain_query,
+            commands::analyze_schema,
+            commands::export_collection,
+            commands::import_documents,
             commands::run_shell,
         ])
         .run(tauri::generate_context!())

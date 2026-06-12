@@ -9,6 +9,7 @@ import {
   Info,
   ListEnd,
   Loader2,
+  Gauge,
   Play,
   Plus,
   SquareTerminal,
@@ -29,6 +30,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { ResultsViewer } from "@/components/explorer/ResultsViewer";
 import { ViewToggle } from "@/components/explorer/DocumentsPane";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
+import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
 import { newStage, useExplorer, type Stage, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useState } from "react";
@@ -206,7 +208,28 @@ export function AggregatePane({ tab }: { tab: Tab }) {
   const { patchAgg, runAggregate, setTabMode, patchShell } = useExplorer();
   const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
+  const [explain, setExplain] = useState<ExplainRequest | null>(null);
+  const [explainOpen, setExplainOpen] = useState(false);
   const a = tab.agg;
+
+  const openExplain = () => {
+    const stages = a.stages
+      .filter((s) => s.enabled)
+      .map((s) => ({ op: s.op, body: s.body }));
+    if (stages.length === 0) {
+      toast.error("Add at least one enabled stage");
+      return;
+    }
+    setExplain({
+      database: tab.database,
+      collection: tab.collection,
+      filter: "",
+      sort: "",
+      projection: "",
+      pipelineStages: stages,
+    });
+    setExplainOpen(true);
+  };
 
   const pipelineText = () => {
     const parts = a.stages
@@ -290,6 +313,15 @@ export function AggregatePane({ tab }: { tab: Tab }) {
             Allow disk use
           </label>
           <div className="flex-1" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={openExplain}>
+                <Gauge className="h-3.5 w-3.5" />
+                Explain
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Explain plan — index usage & timing</TooltipContent>
+          </Tooltip>
           <Button size="sm" className="h-7 gap-1.5" disabled={a.loading} onClick={() => void runAggregate(tab.id)}>
             {a.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             Run pipeline
@@ -358,6 +390,8 @@ export function AggregatePane({ tab }: { tab: Tab }) {
         onClose={() => setDialog({ type: "closed" })}
         onMutated={() => void runAggregate(tab.id)}
       />
+
+      <ExplainSheet request={explain} open={explainOpen} onOpenChange={setExplainOpen} />
     </div>
   );
 }

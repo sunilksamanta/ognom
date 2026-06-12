@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { FileJson2, ListTree, SquareTerminal, Wrench } from "lucide-react";
+import { FileJson2, ListTree, SquareTerminal, TableProperties, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DocumentsPane } from "@/components/explorer/DocumentsPane";
 import { AggregatePane } from "@/components/aggregation/AggregatePane";
 import { ShellPane } from "@/components/shell/ShellPane";
 import { IndexesSheet } from "@/components/explorer/IndexesSheet";
+import { SchemaSheet } from "@/components/explorer/SchemaSheet";
 import { useExplorer, type Tab, type TabMode } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ export function CollectionTab({ tab }: { tab: Tab }) {
   const advancedMode = useSettings((s) => s.advancedMode);
   const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
   const [indexesOpen, setIndexesOpen] = useState(false);
+  const [schemaOpen, setSchemaOpen] = useState(false);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -67,6 +69,21 @@ export function CollectionTab({ tab }: { tab: Tab }) {
               variant="ghost"
               size="sm"
               className="h-7 gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setSchemaOpen(true)}
+            >
+              <TableProperties className="h-3.5 w-3.5" />
+              Schema
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Analyze field types & coverage</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-muted-foreground"
               onClick={() => setIndexesOpen(true)}
             >
               <Wrench className="h-3.5 w-3.5" />
@@ -82,6 +99,7 @@ export function CollectionTab({ tab }: { tab: Tab }) {
       {tab.mode === "shell" && advancedMode && <ShellPane tab={tab} />}
 
       <IndexesSheet tab={tab} open={indexesOpen} onOpenChange={setIndexesOpen} />
+      <SchemaSheet tab={tab} open={schemaOpen} onOpenChange={setSchemaOpen} />
     </div>
   );
 }

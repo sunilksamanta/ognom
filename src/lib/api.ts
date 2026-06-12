@@ -131,6 +131,35 @@ export interface IndexInfo {
   partialFilter?: Doc | null;
 }
 
+export interface ExplainSummary {
+  indexName: string | null;
+  stages: string[];
+  isCollectionScan: boolean;
+  nReturned: number | null;
+  totalDocsExamined: number | null;
+  totalKeysExamined: number | null;
+  executionTimeMillis: number | null;
+  raw: Doc;
+}
+
+export interface SchemaFieldType {
+  type: string;
+  count: number;
+}
+
+export interface SchemaField {
+  path: string;
+  present: number;
+  coverage: number; // 0..1
+  types: SchemaFieldType[];
+  examples: unknown[];
+}
+
+export interface SchemaReport {
+  sampled: number;
+  fields: SchemaField[];
+}
+
 export interface CollectionStats {
   count?: number | null;
   size?: number | null;
@@ -205,6 +234,29 @@ export const api = {
     invoke<void>("drop_index", { database, collection, name }),
   collectionStats: (database: string, collection: string) =>
     invoke<CollectionStats>("collection_stats", { database, collection }),
+
+  // explain / schema / export / import
+  explainQuery: (args: {
+    database: string;
+    collection: string;
+    filter: string;
+    sort: string;
+    projection: string;
+    pipelineStages?: StageInput[];
+    verbosity?: string;
+  }) => invoke<ExplainSummary>("explain_query", args),
+  analyzeSchema: (database: string, collection: string, sampleSize?: number) =>
+    invoke<SchemaReport>("analyze_schema", { database, collection, sampleSize }),
+  exportCollection: (args: {
+    database: string;
+    collection: string;
+    filter: string;
+    sort: string;
+    format: "json" | "csv";
+    path: string;
+  }) => invoke<number>("export_collection", args),
+  importDocuments: (database: string, collection: string, path: string) =>
+    invoke<number>("import_documents", { database, collection, path }),
 
   // shell
   runShell: (database: string, text: string) => invoke<ShellOutcome>("run_shell", { database, text }),

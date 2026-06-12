@@ -3,13 +3,17 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  Download,
   FileJson2,
+  Gauge,
   Loader2,
   Play,
   Plus,
   RotateCcw,
   SlidersHorizontal,
   Table2,
+  Upload,
+  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,11 +26,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ResultsViewer } from "@/components/explorer/ResultsViewer";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
+import { QueryBuilder } from "@/components/explorer/QueryBuilder";
+import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
 import { useExplorer, type Tab, type ViewMode } from "@/stores/explorer";
 import { formatCount } from "@/lib/bson";
+import { exportCollection, importDocuments } from "@/lib/files";
 import type { Doc } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -66,9 +81,23 @@ export function ViewToggle({
 export function DocumentsPane({ tab }: { tab: Tab }) {
   const { patchDocs, runFind } = useExplorer();
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [explain, setExplain] = useState<ExplainRequest | null>(null);
+  const [explainOpen, setExplainOpen] = useState(false);
   const d = tab.docs;
 
   const run = (resetPage: boolean) => void runFind(tab.id, { resetPage });
+
+  const openExplain = () => {
+    setExplain({
+      database: tab.database,
+      collection: tab.collection,
+      filter: d.filter,
+      sort: d.sort,
+      projection: d.projection,
+    });
+    setExplainOpen(true);
+  };
 
   const hasMore =
     d.count !== null ? (d.page + 1) * d.limit < d.count : d.docs.length === d.limit;
@@ -96,6 +125,29 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
           className="h-8 flex-1 font-mono text-xs"
           spellCheck={false}
         />
+
+        <Popover open={builderOpen} onOpenChange={setBuilderOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Build
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Visual query builder</TooltipContent>
+          </Tooltip>
+          <PopoverContent align="start" className="w-auto">
+            <QueryBuilder
+              onApply={(filter) => {
+                patchDocs(tab.id, { filter });
+                setBuilderOpen(false);
+                void runFind(tab.id, { resetPage: true });
+              }}
+            />
+          </PopoverContent>
+        </Popover>
 
         <Popover>
           <PopoverTrigger asChild>
@@ -161,9 +213,76 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
           </Tooltip>
         )}
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openExplain}>
+              <Gauge className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Explain plan — index usage & timing</TooltipContent>
+        </Tooltip>
+
         <div className="mx-1 h-5 w-px bg-border" />
 
         <ViewToggle view={d.view} onChange={(view) => patchDocs(tab.id, { view })} />
+
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Export / Import</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Export {d.filter.trim() ? "(current filter)" : "all"}</DropdownMenuLabel>
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() =>
+                void exportCollection({
+                  database: tab.database,
+                  collection: tab.collection,
+                  filter: d.filter,
+                  sort: d.sort,
+                  format: "json",
+                })
+              }
+            >
+              <FileJson2 className="h-3.5 w-3.5" />
+              Export as JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() =>
+                void exportCollection({
+                  database: tab.database,
+                  collection: tab.collection,
+                  filter: d.filter,
+                  sort: d.sort,
+                  format: "csv",
+                })
+              }
+            >
+              <Table2 className="h-3.5 w-3.5" />
+              Export as CSV
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() =>
+                void importDocuments(tab.database, tab.collection).then(
+                  (ok) => ok && run(false)
+                )
+              }
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Import documents…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Button
           variant="outline"
@@ -269,6 +388,8 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
         onClose={() => setDialog({ type: "closed" })}
         onMutated={() => run(false)}
       />
+
+      <ExplainSheet request={explain} open={explainOpen} onOpenChange={setExplainOpen} />
     </div>
   );
 }

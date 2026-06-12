@@ -12,6 +12,7 @@
     "core:window:allow-toggle-maximize",
     "core:webview:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "dialog:default"
   ]
 }
