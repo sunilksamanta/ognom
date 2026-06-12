@@ -36,6 +36,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 aes-gcm = "0.10"
 base64 = "0.22"
 thiserror = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-updater = "2"

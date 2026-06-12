@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, PlugZap, Search, Settings2, Terminal } from "lucide-react";
+import { Bot, ChevronDown, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
+import { useStudio } from "@/stores/studio";
 import { dragWindow } from "@/lib/window";
 import { checkForUpdates } from "@/lib/updater";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { active, disconnect } = useConnections();
   const resetExplorer = useExplorer((s) => s.reset);
   const { pageSize, setPageSize, advancedMode, setAdvancedMode } = useSettings();
+  const { terminator, setTerminator } = useStudio();
   const [managerOpen, setManagerOpen] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
@@ -61,6 +63,38 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </button>
 
       <div className="flex-1" />
+
+      {/* mode switch — classic workspace vs Terminator mode (Ognom Studio) */}
+      <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
+        {(
+          [
+            { on: false, label: "Normal", icon: PanelsTopLeft, hint: "Classic workspace" },
+            { on: true, label: "Terminator", icon: Bot, hint: "Ognom Studio — AI visualization & query optimization" },
+          ] as const
+        ).map((m) => (
+          <Tooltip key={m.label}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setTerminator(m.on)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
+                  terminator === m.on
+                    ? m.on
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <m.icon className="h-3.5 w-3.5" />
+                {m.label}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{m.hint}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+
+      <div className="mx-1 h-5 w-px bg-border" />
 
       {/* command palette hint */}
       <Button

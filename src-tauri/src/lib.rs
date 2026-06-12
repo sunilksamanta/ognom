@@ -103,6 +103,8 @@ pub fn run() {
             commands::analyze_schema,
             commands::export_collection,
             commands::import_documents,
+            commands::ai_chat,
+            commands::save_file,
             commands::run_shell,
         ])
         .run(tauri::generate_context!())

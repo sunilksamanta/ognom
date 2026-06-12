@@ -11,11 +11,14 @@ import { SplashScreen } from "@/components/SplashScreen";
 import { AboutDialog } from "@/components/AboutDialog";
 import { useConnections } from "@/stores/connections";
 import { useSettings } from "@/stores/settings";
+import { useStudio } from "@/stores/studio";
+import { StudioPane } from "@/components/studio/StudioPane";
 import { checkForUpdates } from "@/lib/updater";
 
 function App() {
   const status = useConnections((s) => s.status);
   const init = useConnections((s) => s.init);
+  const terminator = useStudio((s) => s.terminator);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -77,8 +80,14 @@ function App() {
           <>
             <TopBar onOpenPalette={() => setPaletteOpen(true)} />
             <div className="flex min-h-0 flex-1">
-              <Sidebar />
-              <Workspace />
+              {terminator ? (
+                <StudioPane />
+              ) : (
+                <>
+                  <Sidebar />
+                  <Workspace />
+                </>
+              )}
             </div>
             <StatusBar />
             <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

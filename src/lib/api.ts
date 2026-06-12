@@ -260,6 +260,18 @@ export const api = {
   importDocuments: (database: string, collection: string, path: string) =>
     invoke<number>("import_documents", { database, collection, path }),
 
+  // Ognom Studio
+  saveFile: (path: string, contentsBase64: string) =>
+    invoke<void>("save_file", { path, contentsBase64 }),
+  aiChat: (args: {
+    apiKey: string;
+    model: string;
+    system: string;
+    user: string;
+    jsonMode: boolean;
+    reasoning: boolean;
+  }) => invoke<string>("ai_chat", args),
+
   // shell
   runShell: (database: string, text: string) => invoke<ShellOutcome>("run_shell", { database, text }),
 };

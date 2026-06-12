@@ -1043,6 +1043,86 @@ pub async fn import_documents(
     Ok(n)
 }
 
+/// Write arbitrary (base64-encoded) bytes to a user-chosen path. Used by
+/// Studio exports (chart PNGs, result JSON/CSV).
+#[tauri::command]
+pub async fn save_file(path: String, contents_base64: String) -> AppResult<()> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(contents_base64.as_bytes())
+        .map_err(|e| AppError::Parse(format!("invalid file payload: {e}")))?;
+    std::fs::write(&path, bytes).map_err(|e| AppError::Parse(format!("cannot write {path}: {e}")))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Ognom Studio — AI chat proxy
+// ---------------------------------------------------------------------------
+
+/// Proxy a chat completion to OpenAI from the backend (no CORS, key stays
+/// out of the webview's network layer). Returns the assistant message text.
+#[tauri::command]
+pub async fn ai_chat(
+    api_key: String,
+    model: String,
+    system: String,
+    user: String,
+    json_mode: bool,
+    reasoning: bool,
+) -> AppResult<String> {
+    if api_key.trim().is_empty() {
+        return Err(AppError::Parse("OpenAI API key is not set — add it in Studio settings".into()));
+    }
+
+    let mut body = json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+    if json_mode {
+        body["response_format"] = json!({ "type": "json_object" });
+    }
+    if reasoning {
+        body["reasoning_effort"] = json!("medium");
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| AppError::Parse(format!("http client: {e}")))?;
+
+    let resp = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(api_key.trim())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Parse(format!("OpenAI request failed: {e}")))?;
+
+    let status = resp.status();
+    let payload: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Parse(format!("OpenAI response unreadable: {e}")))?;
+
+    if !status.is_success() {
+        let msg = payload
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+        return Err(AppError::Parse(format!("OpenAI ({status}): {msg}")));
+    }
+
+    payload
+        .pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| AppError::Parse("OpenAI returned an empty response".into()))
+}
+
 // ---------------------------------------------------------------------------
 // shell execution
 // ---------------------------------------------------------------------------
