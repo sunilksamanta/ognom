@@ -140,6 +140,8 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
           </Tooltip>
           <PopoverContent align="start" className="w-auto">
             <QueryBuilder
+              database={tab.database}
+              collection={tab.collection}
               onApply={(filter) => {
                 patchDocs(tab.id, { filter });
                 setBuilderOpen(false);

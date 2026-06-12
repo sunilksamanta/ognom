@@ -247,6 +247,8 @@ export const api = {
   }) => invoke<ExplainSummary>("explain_query", args),
   analyzeSchema: (database: string, collection: string, sampleSize?: number) =>
     invoke<SchemaReport>("analyze_schema", { database, collection, sampleSize }),
+  collectionFields: (database: string, collection: string, limit?: number) =>
+    invoke<string[]>("collection_fields", { database, collection, limit }),
   exportCollection: (args: {
     database: string;
     collection: string;

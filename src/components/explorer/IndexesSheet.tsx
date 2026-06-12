@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  Clock,
   Code2,
   EyeOff,
   Hash,
+  Key,
+  Layers,
   Loader2,
   MapPin,
   Plus,
-  Sparkles,
   Type,
   Wand2,
   X,
@@ -104,14 +106,14 @@ const TEMPLATES: Template[] = [
   {
     id: "single",
     label: "Single field",
-    icon: Sparkles,
+    icon: Key,
     desc: "One field, ascending or descending",
     keys: () => [newKey("", "1")],
   },
   {
     id: "compound",
     label: "Compound",
-    icon: Hash,
+    icon: Layers,
     desc: "Multiple fields, order matters",
     keys: () => [newKey("", "1"), newKey("", "-1")],
   },
@@ -139,7 +141,7 @@ const TEMPLATES: Template[] = [
   {
     id: "ttl",
     label: "TTL (expiring)",
-    icon: Sparkles,
+    icon: Clock,
     desc: "Auto-delete docs after a time",
     keys: () => [newKey("createdAt", "1")],
     defaults: { ttlEnabled: true },

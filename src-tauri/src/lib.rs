@@ -99,6 +99,7 @@ pub fn run() {
             commands::drop_index,
             commands::collection_stats,
             commands::explain_query,
+            commands::collection_fields,
             commands::analyze_schema,
             commands::export_collection,
             commands::import_documents,

@@ -771,6 +771,48 @@ fn summarize_explain(raw: &Document) -> Document {
     }
 }
 
+/// Collect dotted field paths from the most recent `limit` documents (ordered
+/// by `_id` desc), sorted by how often each path appears. Used to power
+/// field autocompletion in the query builder.
+#[tauri::command]
+pub async fn collection_fields(
+    database: String,
+    collection: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<String>> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let limit = limit.unwrap_or(1000).clamp(10, 5000);
+
+    let docs: Vec<Document> = coll
+        .find(doc! {})
+        .sort(doc! {"_id": -1})
+        .limit(limit)
+        .await?
+        .try_collect()
+        .await?;
+
+    use std::collections::HashMap;
+    let mut freq: HashMap<String, i64> = HashMap::new();
+    fn visit(prefix: &str, doc: &Document, freq: &mut HashMap<String, i64>) {
+        for (k, v) in doc {
+            let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+            *freq.entry(path.clone()).or_insert(0) += 1;
+            if let Bson::Document(sub) = v {
+                visit(&path, sub, freq);
+            }
+        }
+    }
+    for d in &docs {
+        visit("", d, &mut freq);
+    }
+
+    let mut paths: Vec<(String, i64)> = freq.into_iter().collect();
+    paths.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Ok(paths.into_iter().map(|(p, _)| p).collect())
+}
+
 // ---------------------------------------------------------------------------
 // schema analysis
 // ---------------------------------------------------------------------------
