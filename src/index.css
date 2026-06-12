@@ -4,108 +4,145 @@
 
 @layer base {
   :root {
-    /* Softer MongoDB Green - Eye-soothing */
-    --primary: 158 64% 52%;
-    --primary-foreground: 0 0% 100%;
-    
-    /* Light Mode - Soft Backgrounds */
-    --background: 220 23% 97%;
-    --foreground: 224 15% 25%;
-    
-    /* Card & Surface */
+    /* ── Ognom light · "paper & emerald" ─────────────────────── */
+    --background: 220 25% 97%;
+    --foreground: 224 25% 14%;
+
     --card: 0 0% 100%;
-    --card-foreground: 224 15% 25%;
-    
-    /* Popover */
+    --card-foreground: 224 25% 14%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 15% 25%;
-    
-    /* Secondary - Soft Lavender */
-    --secondary: 250 30% 85%;
-    --secondary-foreground: 224 15% 25%;
-    
-    /* Muted - Gentle Gray */
-    --muted: 220 20% 94%;
-    --muted-foreground: 220 10% 50%;
-    
-    /* Accent - Calm Blue */
-    --accent: 200 50% 85%;
-    --accent-foreground: 224 15% 25%;
-    
-    /* Destructive - Soft Red */
-    --destructive: 0 65% 65%;
+    --popover-foreground: 224 25% 14%;
+
+    --primary: 158 72% 34%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 18% 92%;
+    --secondary-foreground: 224 20% 22%;
+
+    --muted: 220 18% 93%;
+    --muted-foreground: 220 10% 44%;
+
+    --accent: 220 20% 90%;
+    --accent-foreground: 224 25% 14%;
+
+    --destructive: 0 68% 48%;
     --destructive-foreground: 0 0% 100%;
-    
-    /* Border */
-    --border: 220 20% 88%;
-    --input: 220 20% 90%;
-    --ring: 158 64% 52%;
-    --radius: 0.5rem;
-    
-    /* Custom MongoDB Colors - Softer Palette */
-    --mongo-green: 158 64% 52%;
-    --mongo-green-dark: 158 64% 42%;
-    --mongo-green-light: 158 50% 70%;
-    --mongo-green-pale: 158 40% 92%;
-    
-    /* Soft Pastel Complementary */
-    --pastel-blue: 200 50% 85%;
-    --pastel-purple: 250 30% 85%;
-    --pastel-pink: 340 60% 88%;
-    --pastel-peach: 30 70% 85%;
-    --pastel-mint: 160 40% 85%;
-    
-    /* Status Colors - Eye-friendly */
-    --success: 158 64% 52%;
-    --error: 0 65% 65%;
-    --warning: 35 80% 65%;
-    --info: 200 70% 60%;
+
+    --warning: 38 92% 42%;
+    --info: 212 80% 46%;
+
+    --border: 220 16% 87%;
+    --input: 220 16% 84%;
+    --ring: 158 72% 34%;
+
+    --radius: 0.55rem;
+
+    /* BSON value colors */
+    --bson-key: 212 70% 40%;
+    --bson-string: 28 72% 40%;
+    --bson-number: 265 60% 50%;
+    --bson-boolean: 335 65% 46%;
+    --bson-null: 220 9% 52%;
+    --bson-oid: 158 62% 32%;
+    --bson-date: 192 72% 34%;
   }
 
   .dark {
-    /* Dark Mode - Comfortable for eyes */
-    --background: 224 20% 12%;
-    --foreground: 220 15% 92%;
-    
-    --card: 224 18% 15%;
-    --card-foreground: 220 15% 92%;
-    
-    --popover: 224 18% 17%;
-    --popover-foreground: 220 15% 92%;
-    
-    /* Softer green for dark mode */
-    --primary: 158 58% 48%;
-    --primary-foreground: 224 20% 12%;
-    
-    --secondary: 250 20% 30%;
-    --secondary-foreground: 220 15% 92%;
-    
-    --muted: 224 15% 22%;
-    --muted-foreground: 220 12% 65%;
-    
-    --accent: 200 30% 35%;
-    --accent-foreground: 220 15% 92%;
-    
-    --destructive: 0 60% 55%;
-    --destructive-foreground: 220 15% 92%;
-    
-    --border: 224 15% 22%;
-    --input: 224 15% 22%;
-    --ring: 158 58% 48%;
-  }
-}
+    /* ── Ognom dark · "ink & emerald" ────────────────────────── */
+    --background: 222 22% 6%;
+    --foreground: 214 22% 88%;
 
-@layer base {
+    --card: 222 19% 9%;
+    --card-foreground: 214 22% 88%;
+    --popover: 222 19% 10%;
+    --popover-foreground: 214 22% 88%;
+
+    --primary: 155 65% 45%;
+    --primary-foreground: 160 90% 6%;
+
+    --secondary: 221 16% 14%;
+    --secondary-foreground: 214 18% 80%;
+
+    --muted: 221 16% 13%;
+    --muted-foreground: 220 9% 56%;
+
+    --accent: 221 16% 17%;
+    --accent-foreground: 214 22% 90%;
+
+    --destructive: 0 66% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --warning: 40 90% 58%;
+    --info: 210 85% 66%;
+
+    --border: 220 14% 16%;
+    --input: 220 14% 19%;
+    --ring: 155 65% 45%;
+
+    /* BSON value colors */
+    --bson-key: 210 65% 71%;
+    --bson-string: 34 68% 64%;
+    --bson-number: 265 65% 75%;
+    --bson-boolean: 335 70% 69%;
+    --bson-null: 220 9% 50%;
+    --bson-oid: 155 55% 56%;
+    --bson-date: 190 65% 60%;
+  }
+
   * {
     @apply border-border;
   }
-  
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
   body {
-    @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-      sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+  }
+
+  /* Slim, theme-aware scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.45);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .font-data {
+    font-family: theme(fontFamily.mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  /* Keep native UI text from being draggable in a desktop window */
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
   }
 }

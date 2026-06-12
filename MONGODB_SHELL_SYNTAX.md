@@ -1,204 +1,103 @@
-# MongoDB Shell Syntax Support
+# Ognom shell syntax
 
-Ognom now supports MongoDB shell syntax for queries and results display!
+The shell tab (and the filter / sort / projection boxes, and the document
+editor) understand mongosh-flavored syntax — not just strict JSON.
 
-## Supported Syntax
+Everything below is parsed **string-aware**: helper syntax inside your string
+data is never rewritten.
 
-### ObjectId
+## Statements
 
-**In Queries (Input):**
+One statement per run. Comments (`//` and `/* */`) are allowed anywhere.
+
 ```javascript
-// Find by ObjectId
-{
-  "_id": ObjectId("507f1f77bcf86cd799439011")
-}
+db.users.find({ role: "admin" }, { name: 1 }).sort({ createdAt: -1 }).skip(10).limit(5)
+db.users.findOne({ _id: ObjectId("507f1f77bcf86cd799439011") })
+db.orders.aggregate([
+  { $match: { status: "paid" } },           // unquoted keys, comments — fine
+  { $group: { _id: "$category", n: { $sum: 1 } } },
+])
+db.users.countDocuments({ active: true })
+db.users.estimatedDocumentCount()
+db.users.distinct("country", { active: true })
 
-// Update by ObjectId
-{
-  "filter": { "_id": ObjectId("6877a7a5b2482ef444b24ced") },
-  "update": { "$set": { "status": "active" } }
-}
+db.users.insertOne({ name: "Ada", joined: ISODate() })
+db.users.insertMany([{ a: 1 }, { a: 2 }])
+db.users.updateOne({ _id: ObjectId("…") }, { $set: { active: false } })
+db.users.updateMany({ active: false }, { $set: { archived: true } }, { upsert: false })
+db.users.replaceOne({ _id: ObjectId("…") }, { name: "Replaced" })
+db.users.deleteOne({ _id: ObjectId("…") })
+db.users.deleteMany({ archived: true })
 
-// Array of ObjectIds
-{
-  "userId": { "$in": [
-    ObjectId("507f1f77bcf86cd799439011"),
-    ObjectId("507f1f77bcf86cd799439012")
-  ]}
-}
+db.users.getIndexes()
+db.users.createIndex({ email: 1 }, { unique: true, name: "uniq_email" })
+db.users.dropIndex("uniq_email")
+db.users.stats()
+db.users.drop()
+
+db.getCollection("weird-name.with.dots").find({})
+db.runCommand({ ping: 1 })
+db.adminCommand({ listDatabases: 1 })
+db.createCollection("events")
+db.stats()
+db.version()
+db.dropDatabase()
+
+show dbs
+show collections
+use otherDatabase        // switches the tab's shell context
 ```
 
-**In Results (Output):**
-Instead of the extended JSON format:
-```json
-{
-  "_id": {
-    "$oid": "507f1f77bcf86cd799439011"
-  }
-}
-```
+### Cursor chains (find)
 
-You'll see the cleaner MongoDB shell format:
-```javascript
-{
-  "_id": ObjectId("507f1f77bcf86cd799439011")
-}
-```
+`.sort({})`, `.limit(n)`, `.skip(n)`, `.project({})`, `.hint({})`, `.count()`,
+plus no-ops people type out of habit: `.toArray()`, `.pretty()`.
 
-### ISODate
+`find` without `.limit()` is capped at **100 documents** (you'll see a notice).
+Aggregations without `$limit` / `$out` / `$merge` / `$count` / `$sample` are
+capped at **500**.
 
-**In Queries (Input):**
-```javascript
-// Current date/time
-{
-  "createdAt": ISODate()
-}
+### Updates
 
-// Specific date
-{
-  "startDate": ISODate("2025-01-15T00:00:00Z")
-}
+`updateOne` / `updateMany` require operator documents (`{ $set: … }`). For a
+full replacement use `replaceOne` — this mirrors mongosh and prevents
+accidental document clobbering.
 
-// Date range query
-{
-  "createdAt": {
-    "$gte": ISODate("2025-01-01T00:00:00Z"),
-    "$lt": ISODate("2025-02-01T00:00:00Z")
-  }
-}
+## Value syntax (JSON5 + helpers)
 
-// Insert with timestamp
-{
-  "name": "John Doe",
-  "createdAt": ISODate(),
-  "updatedAt": ISODate()
-}
-```
-
-**In Results (Output):**
-Instead of the extended JSON format:
-```json
-{
-  "dateOfBirth": {
-    "$date": {
-      "$numberLong": "810691200000"
-    }
-  }
-}
-```
-
-You'll see the MongoDB shell format:
 ```javascript
 {
-  "dateOfBirth": ISODate("1995-09-09T00:00:00.000Z")
+  unquoted: "keys",
+  single: 'quotes',
+  trailing: "commas",      // ← allowed
+  _id: ObjectId("507f1f77bcf86cd799439011"),
+  when: ISODate("2024-01-15T10:00:00Z"),
+  now: ISODate(),                       // current time
+  epoch: Date(1700000000000),           // ms since epoch
+  big: NumberLong("9007199254740993"),
+  small: NumberInt(7),
+  precise: NumberDecimal("19.99"),
+  forced: Double("3"),
+  uuid: UUID("3b241101-e2bb-4255-8caf-4136c566a962"),
+  blob: BinData(0, "aGVsbG8="),
+  ts: Timestamp(170000, 1),
+  range: { from: MinKey, to: MaxKey },
 }
 ```
 
-## Examples by Query Type
+Whole numbers are stored as integers (Int32/Int64), fractional as doubles —
+the same heuristic mongosh uses. Use `NumberLong` / `NumberDecimal` / `Double`
+to force a type.
 
-### find / findOne
-```javascript
-// Find by ObjectId and date range
-{
-  "_id": ObjectId("507f1f77bcf86cd799439011"),
-  "createdAt": {
-    "$gte": ISODate("2025-01-01T00:00:00Z")
-  }
-}
-```
+### Display
 
-### aggregate
-```javascript
-[
-  {
-    "$match": {
-      "createdAt": { "$gte": ISODate("2025-01-01T00:00:00Z") }
-    }
-  },
-  {
-    "$group": {
-      "_id": "$userId",
-      "count": { "$sum": 1 }
-    }
-  }
-]
-```
+Results render as relaxed Extended JSON with shell-style affordances:
+`ObjectId(…)` pills, ISO dates, typed colors in both the JSON tree and the
+table. *Copy as shell* produces text that pastes straight back into mongosh
+or this shell; *Copy as Extended JSON* produces strict JSON.
 
-### insertOne / insertMany
-```javascript
-// Single document with timestamps
-{
-  "name": "John Doe",
-  "email": "john@example.com",
-  "createdAt": ISODate(),
-  "updatedAt": ISODate()
-}
+## Not supported (yet)
 
-// Multiple documents
-[
-  {
-    "name": "John",
-    "createdAt": ISODate()
-  },
-  {
-    "name": "Jane",
-    "createdAt": ISODate()
-  }
-]
-```
-
-### updateOne / updateMany
-```javascript
-{
-  "filter": {
-    "_id": ObjectId("507f1f77bcf86cd799439011")
-  },
-  "update": {
-    "$set": {
-      "status": "active",
-      "updatedAt": ISODate()
-    }
-  }
-}
-```
-
-### deleteOne / deleteMany
-```javascript
-// Delete by ObjectId
-{
-  "_id": ObjectId("507f1f77bcf86cd799439011")
-}
-
-// Delete old records
-{
-  "createdAt": {
-    "$lt": ISODate("2024-01-01T00:00:00Z")
-  }
-}
-```
-
-## How It Works
-
-### Backend Processing
-1. **Input Conversion**: When you submit a query, the backend automatically converts MongoDB shell syntax to extended JSON format that MongoDB drivers understand:
-   - `ObjectId("...")` → `{"$oid": "..."}`
-   - `ISODate("...")` → `{"$date": "..."}`
-   - `ISODate()` → `{"$date": "<current_timestamp>"}`
-
-2. **Output Conversion**: Results from MongoDB are converted from extended JSON to readable MongoDB shell format:
-   - `{"$oid": "..."}` → `ObjectId("...")`
-   - `{"$date": {"$numberLong": "..."}}` → `ISODate("...")`
-   - `{"$date": "..."}` → `ISODate("...")`
-
-### Benefits
-- ✅ More readable and familiar syntax (same as MongoDB shell)
-- ✅ Copy-paste queries from MongoDB documentation
-- ✅ Cleaner display of ObjectIds and dates in results
-- ✅ Automatic timestamp generation with `ISODate()`
-- ✅ Works with all query types (find, aggregate, insert, update, delete)
-
-## Notes
-- ObjectIds must be exactly 24 hexadecimal characters
-- Date strings should be in ISO 8601 format
-- `ISODate()` without arguments uses the current date/time
-- The conversion is automatic - no configuration needed!
+- Multiple statements per run, variables, or arbitrary JavaScript
+- Regex literals (`/abc/i`) — use `{ $regex: "abc", $options: "i" }`
+- `findOneAndUpdate` family, bulk operations, transactions

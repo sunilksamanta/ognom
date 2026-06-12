@@ -1,10 +1,9 @@
+import animate from "tailwindcss-animate";
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
@@ -41,6 +40,37 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        warning: "hsl(var(--warning))",
+        info: "hsl(var(--info))",
+        bson: {
+          key: "hsl(var(--bson-key))",
+          string: "hsl(var(--bson-string))",
+          number: "hsl(var(--bson-number))",
+          boolean: "hsl(var(--bson-boolean))",
+          null: "hsl(var(--bson-null))",
+          oid: "hsl(var(--bson-oid))",
+          date: "hsl(var(--bson-date))",
+        },
+      },
+      fontFamily: {
+        sans: [
+          "ui-sans-serif",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Inter",
+          "Roboto",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          "SF Mono",
+          "JetBrains Mono",
+          "Cascadia Code",
+          "Menlo",
+          "Consolas",
+          "monospace",
+        ],
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -49,5 +79,5 @@ export default {
       },
     },
   },
-  plugins: [],
-}
+  plugins: [animate],
+};

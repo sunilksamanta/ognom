@@ -8,10 +8,22 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
-  
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+
+  build: {
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Monaco is by far the largest dependency — keep it out of the app chunk.
+          monaco: ["monaco-editor"],
+        },
+      },
     },
   },
 

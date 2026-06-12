@@ -1,8 +1,9 @@
 [package]
 name = "ognom"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "1.0.0"
+description = "Ognom — the free, lightweight, no-nonsense MongoDB desktop client"
+authors = ["Sunil Kr. Samanta"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -21,9 +22,25 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-mongodb = "3.1"
+mongodb = "3"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
-tauri-plugin-shell = "2"
 regex = "1"
 chrono = "0.4"
+json5 = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+aes-gcm = "0.10"
+base64 = "0.22"
+thiserror = "2"
+
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

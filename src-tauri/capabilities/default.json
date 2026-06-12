@@ -8,7 +8,10 @@
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-set-title",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "core:webview:default",
-    "core:webview:allow-print"
+    "updater:default",
+    "process:default"
   ]
 }
