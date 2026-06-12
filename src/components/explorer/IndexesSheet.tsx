@@ -11,7 +11,7 @@ import {
   MapPin,
   Plus,
   Type,
-  Wand2,
+  LayoutList,
   X,
 } from "lucide-react";
 import {
@@ -478,7 +478,7 @@ function CreateForm({
             onClick={() => setRawMode(!rawMode)}
             className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
-            {rawMode ? <Wand2 className="h-3 w-3" /> : <Code2 className="h-3 w-3" />}
+            {rawMode ? <LayoutList className="h-3 w-3" /> : <Code2 className="h-3 w-3" />}
             {rawMode ? "Visual builder" : "Raw JSON"}
           </button>
         </div>

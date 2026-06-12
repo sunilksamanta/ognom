@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Plus, X, Wand2 } from "lucide-react";
+import { ListFilter, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -191,7 +191,7 @@ export function QueryBuilder({
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-sm font-medium">
-          <Wand2 className="h-3.5 w-3.5 text-primary" />
+          <ListFilter className="h-3.5 w-3.5 text-primary" />
           Query builder
         </div>
         <div className="flex items-center rounded-md border bg-muted/60 p-0.5 text-[11px]">

@@ -13,7 +13,7 @@ import {
   SlidersHorizontal,
   Table2,
   Upload,
-  Wand2,
+  ListFilter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,7 +131,7 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
             <TooltipTrigger asChild>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
-                  <Wand2 className="h-3.5 w-3.5" />
+                  <ListFilter className="h-3.5 w-3.5" />
                   Build
                 </Button>
               </PopoverTrigger>

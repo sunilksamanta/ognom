@@ -1,18 +1,8 @@
 import { useState } from "react";
-import { Bot, ChevronDown, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
+import { ChevronDown, Cpu, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OgnomMark } from "@/components/WelcomeScreen";
 import { ConnectionManager } from "@/components/connections/ConnectionManager";
@@ -22,7 +12,6 @@ import { useExplorer } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useStudio } from "@/stores/studio";
 import { dragWindow } from "@/lib/window";
-import { checkForUpdates } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 
 const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
@@ -30,9 +19,10 @@ const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { active, disconnect } = useConnections();
   const resetExplorer = useExplorer((s) => s.reset);
-  const { pageSize, setPageSize, advancedMode, setAdvancedMode } = useSettings();
+  const advancedMode = useSettings((s) => s.advancedMode);
   const { terminator, setTerminator } = useStudio();
   const [managerOpen, setManagerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   return (
@@ -69,7 +59,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {(
           [
             { on: false, label: "Normal", icon: PanelsTopLeft, hint: "Classic workspace" },
-            { on: true, label: "Terminator", icon: Bot, hint: "Ognom Studio — AI visualization & query optimization" },
+            { on: true, label: "Terminator", icon: Cpu, hint: "Ognom Studio — AI visualization & query optimization" },
           ] as const
         ).map((m) => (
           <Tooltip key={m.label}>
@@ -122,40 +112,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         </Tooltip>
       )}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-7 w-7">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSettingsOpen(true)}>
             <Settings2 className="h-4 w-4" />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel>Preferences</DropdownMenuLabel>
-          <DropdownMenuCheckboxItem
-            checked={advancedMode}
-            onCheckedChange={setAdvancedMode}
-          >
-            Advanced mode (shell)
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-            Documents per page
-          </DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={String(pageSize)}
-            onValueChange={(v) => setPageSize(Number(v))}
-          >
-            {[10, 25, 50, 100].map((n) => (
-              <DropdownMenuRadioItem key={n} value={String(n)}>
-                {n}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => void checkForUpdates(true)}>
-            Check for updates…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </TooltipTrigger>
+        <TooltipContent>Settings</TooltipContent>
+      </Tooltip>
 
       <ThemeToggle />
 
@@ -174,6 +138,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </Tooltip>
 
       <ConnectionManager open={managerOpen} onOpenChange={setManagerOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <ConfirmDialog
         open={confirmDisconnect}
         onOpenChange={setConfirmDisconnect}

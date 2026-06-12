@@ -1,26 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  AlignLeft,
   ArrowRight,
   BarChart3,
-  Bot,
   BrainCircuit,
   ChartLine,
   ChartPie,
   Check,
   Code2,
   Copy,
+  Cpu,
   Database,
   Donut,
   Download,
   Gauge,
   ImageDown,
   KeyRound,
+  Lightbulb,
   Loader2,
   Play,
   SendHorizonal,
   Table2,
-  Wand2,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,9 +43,16 @@ import { ViewToggle } from "@/components/explorer/DocumentsPane";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
 import { CanvasChart, type CanvasChartHandle, type ChartData, type ChartType } from "@/components/studio/CanvasChart";
 import { useExplorer } from "@/stores/explorer";
-import { useStudio, AI_MODELS, type AiMode } from "@/stores/studio";
+import { useStudio, AI_MODE_META, DEFAULT_MODELS, type AiMode } from "@/stores/studio";
 import { api, errMsg, type Doc, type ShellOutcome } from "@/lib/api";
-import { generateVizPlan, optimizeQuery, QUICK_PROMPTS, type VizPlan } from "@/lib/ai";
+import {
+  generateVizPlan,
+  optimizeQuery,
+  suggestPrompts,
+  summarizeResults,
+  QUICK_PROMPTS,
+  type VizPlan,
+} from "@/lib/ai";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "@/lib/utils";
 
@@ -180,12 +188,19 @@ type StudioTab = "visualize" | "optimize";
 
 export function StudioPane() {
   const { databases, collections, loadDatabases, loadCollections } = useExplorer();
-  const { apiKey, setApiKey, aiMode, setAiMode } = useStudio();
+  const { apiKey, setApiKey, aiMode, setAiMode, modelNormal, modelDeep } = useStudio();
 
   const [database, setDatabase] = useState("");
   const [collection, setCollection] = useState("");
   const [fields, setFields] = useState<string[]>([]);
   const [tab, setTab] = useState<StudioTab>("visualize");
+  // Bumped counter so re-sending the same query still re-seeds the editor.
+  const [optimizeSeed, setOptimizeSeed] = useState<{ query: string; n: number } | null>(null);
+
+  const sendToOptimize = (query: string) => {
+    setOptimizeSeed((s) => ({ query, n: (s?.n ?? 0) + 1 }));
+    setTab("optimize");
+  };
 
   useEffect(() => {
     if (databases.length === 0) void loadDatabases();
@@ -213,7 +228,7 @@ export function StudioPane() {
       {/* studio header */}
       <div className="no-select flex h-11 shrink-0 items-center gap-2 border-b px-3">
         <span className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
-          <Bot className="h-3.5 w-3.5" />
+          <Cpu className="h-3.5 w-3.5" />
           Ognom Studio
         </span>
 
@@ -251,7 +266,7 @@ export function StudioPane() {
         <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
           {(
             [
-              { id: "visualize", label: "Visualize", icon: Wand2 },
+              { id: "visualize", label: "Visualize", icon: BarChart3 },
               { id: "optimize", label: "Optimize", icon: Gauge },
             ] as const
           ).map((t) => (
@@ -275,7 +290,7 @@ export function StudioPane() {
 
         {/* AI mode */}
         <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
-          {(Object.keys(AI_MODELS) as AiMode[]).map((m) => (
+          {(Object.keys(AI_MODE_META) as AiMode[]).map((m) => (
             <Tooltip key={m}>
               <TooltipTrigger asChild>
                 <button
@@ -292,12 +307,11 @@ export function StudioPane() {
                   ) : (
                     <BrainCircuit className="h-3.5 w-3.5" />
                   )}
-                  {AI_MODELS[m].label}
+                  {AI_MODE_META[m].label}
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                {AI_MODELS[m].model}
-                {AI_MODELS[m].reasoning ? " · reasoning" : " · fast"}
+                {m === "normal" ? modelNormal : modelDeep} · {AI_MODE_META[m].hint}
               </TooltipContent>
             </Tooltip>
           ))}
@@ -309,7 +323,7 @@ export function StudioPane() {
       {!ready ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="no-select flex flex-col items-center gap-3 text-center">
-            <Bot className="h-10 w-10 text-primary/40" />
+            <Cpu className="h-10 w-10 text-primary/40" />
             <p className="text-sm font-medium">Welcome to Ognom Studio</p>
             <p className="max-w-sm text-xs text-muted-foreground">
               Pick a database and collection above, then describe what you want to see — Studio
@@ -318,9 +332,19 @@ export function StudioPane() {
           </div>
         </div>
       ) : tab === "visualize" ? (
-        <VisualizeTab database={database} collection={collection} fields={fields} />
+        <VisualizeTab
+          database={database}
+          collection={collection}
+          fields={fields}
+          onSendToOptimize={sendToOptimize}
+        />
       ) : (
-        <OptimizeTab database={database} collection={collection} fields={fields} />
+        <OptimizeTab
+          database={database}
+          collection={collection}
+          fields={fields}
+          seed={optimizeSeed}
+        />
       )}
     </div>
   );
@@ -364,8 +388,8 @@ function ApiKeyPopover({
           />
           <p className="text-[10px] leading-relaxed text-muted-foreground">
             Stored locally on this machine and sent only to api.openai.com from the Ognom backend.
-            Normal mode uses {AI_MODELS.normal.model}; Deep Think uses {AI_MODELS.deep.model} with
-            reasoning.
+            Models default to {DEFAULT_MODELS.normal} (Normal) and {DEFAULT_MODELS.deep} (Deep
+            Think) — change them in Settings → Prompts &amp; AI.
           </p>
         </div>
         <Button
@@ -392,10 +416,12 @@ function VisualizeTab({
   database,
   collection,
   fields,
+  onSendToOptimize,
 }: {
   database: string;
   collection: string;
   fields: string[];
+  onSendToOptimize: (query: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -406,8 +432,41 @@ function VisualizeTab({
   const [view, setView] = useState<"json" | "table">("table");
   const [chartType, setChartType] = useState<ChartType | null>(null);
   const [showQuery, setShowQuery] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
   const chartRef = useRef<CanvasChartHandle>(null);
+
+  // Suggestions are per-collection; clear when the target changes.
+  useEffect(() => {
+    setSuggestions(null);
+    setSummary(null);
+  }, [database, collection]);
+
+  const loadSuggestions = async () => {
+    setSuggesting(true);
+    try {
+      setSuggestions(await suggestPrompts(database, collection, fields));
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const summarize = async () => {
+    if (!docs || docs.length === 0) return;
+    setSummarizing(true);
+    try {
+      setSummary(await summarizeResults(prompt, docs));
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSummarizing(false);
+    }
+  };
 
   const runPrompt = async (p?: string) => {
     const text = (p ?? prompt).trim();
@@ -416,6 +475,7 @@ function VisualizeTab({
     setBusy(true);
     setError(null);
     setShowQuery(false);
+    setSummary(null);
     try {
       const vizPlan = await generateVizPlan(text, database, collection, fields);
       setPlan(vizPlan);
@@ -467,24 +527,33 @@ function VisualizeTab({
       {/* prompt bar */}
       <div className="shrink-0 border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <Wand2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary/70" />
-            <Input
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !busy && void runPrompt()}
-              placeholder={`Ask anything about ${collection} — "count orders by status as a pie chart"`}
-              className="h-10 border-primary/30 pl-9 text-sm shadow-sm focus-visible:ring-primary/40"
-              disabled={busy}
-            />
-          </div>
+          <Input
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void runPrompt()}
+            placeholder={`Ask anything about ${collection} — "count orders by status as a pie chart"`}
+            className="h-10 flex-1 border-primary/30 text-sm shadow-sm focus-visible:ring-primary/40"
+            disabled={busy}
+          />
           <Button className="h-10 gap-2" disabled={busy || !prompt.trim()} onClick={() => void runPrompt()}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizonal className="h-4 w-4" />}
             Generate
           </Button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {SAMPLE_PROMPTS.map((p) => (
+          <button
+            disabled={busy || suggesting}
+            onClick={() => void loadSuggestions()}
+            className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+          >
+            {suggesting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Lightbulb className="h-3 w-3" />
+            )}
+            Suggest questions
+          </button>
+          {(suggestions ?? SAMPLE_PROMPTS).map((p) => (
             <button
               key={p}
               disabled={busy}
@@ -506,7 +575,7 @@ function VisualizeTab({
       {plan && !error && (
         <div className="mx-4 mt-3 shrink-0 rounded-md border border-primary/25 bg-primary/5 text-xs">
           <div className="flex items-center gap-2 px-3 py-2">
-            <Bot className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <Cpu className="h-3.5 w-3.5 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 truncate">{plan.explanation}</span>
             <Badge variant="secondary" className="h-4 shrink-0 px-1 font-mono text-[10px]">
               {plan.kind}
@@ -528,17 +597,37 @@ function VisualizeTab({
                 <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap rounded-md border bg-card p-2.5 font-mono text-[11px] leading-relaxed">
                   {planToShell(plan, collection)}
                 </pre>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7 shrink-0"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(planToShell(plan, collection));
-                    toast.success("Query copied");
-                  }}
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
+                <div className="flex shrink-0 flex-col gap-1.5">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(planToShell(plan, collection));
+                          toast.success("Query copied");
+                        }}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copy query</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => onSendToOptimize(planToShell(plan, collection))}
+                      >
+                        <Gauge className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Send to Optimize</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
               <p className="mt-2 leading-relaxed text-muted-foreground">
                 <span className="font-medium text-foreground">What it does: </span>
@@ -611,6 +700,20 @@ function VisualizeTab({
                 {docs.length} result{docs.length === 1 ? "" : "s"}
               </span>
               <div className="flex-1" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                disabled={summarizing || docs.length === 0}
+                onClick={() => void summarize()}
+              >
+                {summarizing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <AlignLeft className="h-3.5 w-3.5" />
+                )}
+                Summarize
+              </Button>
               <ViewToggle view={view} onChange={setView} />
               <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void exportData("json")}>
                 <Download className="h-3.5 w-3.5" />
@@ -621,6 +724,12 @@ function VisualizeTab({
                 CSV
               </Button>
             </div>
+            {summary && (
+              <div className="flex shrink-0 items-start gap-2 border-b bg-primary/5 px-3 py-2">
+                <AlignLeft className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                <p className="text-xs leading-relaxed">{summary}</p>
+              </div>
+            )}
             <ResultsViewer
               docs={docs}
               view={view}
@@ -650,10 +759,12 @@ function OptimizeTab({
   database,
   collection,
   fields,
+  seed,
 }: {
   database: string;
   collection: string;
   fields: string[];
+  seed: { query: string; n: number } | null;
 }) {
   const [query, setQuery] = useState(`db.${collection}.find({})`);
   const [outcome, setOutcome] = useState<ShellOutcome | null>(null);
@@ -677,6 +788,19 @@ function OptimizeTab({
       setSuggested(null);
     }
   }, [collection]);
+
+  // Queries handed over from Visualize ("Send to Optimize").
+  const lastSeed = useRef(0);
+  useEffect(() => {
+    if (seed && seed.n !== lastSeed.current) {
+      lastSeed.current = seed.n;
+      setQuery(seed.query);
+      setOutcome(null);
+      setError(null);
+      setNotes(null);
+      setSuggested(null);
+    }
+  }, [seed]);
 
   const run = async (text?: string) => {
     const q = text ?? query;
@@ -739,7 +863,7 @@ function OptimizeTab({
               onClick={() => void ask(p.instruction)}
               className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
             >
-              <Bot className="h-3 w-3 text-primary" />
+              <Cpu className="h-3 w-3 text-primary" />
               {p.label}
             </button>
           ))}
@@ -748,7 +872,7 @@ function OptimizeTab({
         {/* AI output */}
         <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card shadow-sm">
           <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-            <Bot className="h-3.5 w-3.5 text-primary" />
+            <Cpu className="h-3.5 w-3.5 text-primary" />
             <span className="text-xs font-medium">AI assistant</span>
             {thinking && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
           </div>

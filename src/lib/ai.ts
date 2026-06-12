@@ -1,11 +1,11 @@
 import { api } from "@/lib/api";
-import { AI_MODELS, useStudio } from "@/stores/studio";
+import { activeAiConfig, useStudio } from "@/stores/studio";
 
 async function chat(system: string, user: string, jsonMode: boolean): Promise<string> {
-  const { apiKey, aiMode } = useStudio.getState();
-  const cfg = AI_MODELS[aiMode];
+  const state = useStudio.getState();
+  const cfg = activeAiConfig(state);
   return api.aiChat({
-    apiKey,
+    apiKey: state.apiKey,
     model: cfg.model,
     system,
     user,
@@ -73,6 +73,34 @@ export async function generateVizPlan(
     throw new Error("AI returned an invalid plan — try rephrasing the prompt");
   }
   return plan;
+}
+
+/** No-code helper: propose questions a user could ask about this collection. */
+export async function suggestPrompts(
+  database: string,
+  collection: string,
+  fields: string[]
+): Promise<string[]> {
+  const system = `You suggest interesting analytics questions for a MongoDB collection.
+Respond with ONLY a JSON object: { "prompts": ["...", "...", "...", "..."] }.
+Rules: exactly 4 short prompts (max 9 words each), phrased as natural-language requests a non-technical user would type. At least 2 should produce a chart (grouping, counting, averaging, or a time series). Base them strictly on the provided field names.`;
+  const user = `Database: ${database}\nCollection: ${collection}\nFields: ${fields.slice(0, 80).join(", ") || "(unknown)"}`;
+  const text = await chat(system, user, true);
+  const parsed = JSON.parse(extractJson(text)) as { prompts?: unknown };
+  const prompts = Array.isArray(parsed.prompts)
+    ? parsed.prompts.filter((p): p is string => typeof p === "string").slice(0, 4)
+    : [];
+  if (prompts.length === 0) throw new Error("No suggestions returned — try again");
+  return prompts;
+}
+
+/** No-code helper: plain-language summary of a result set. */
+export async function summarizeResults(prompt: string, docs: unknown[]): Promise<string> {
+  const system = `You summarize MongoDB query results for a non-technical reader.
+Respond with 2-4 short plain-text sentences: the headline finding first, then notable patterns or outliers. No markdown, no code, no JSON.`;
+  const sample = JSON.stringify(docs.slice(0, 40));
+  const user = `Original question: ${prompt}\nResult sample (${docs.length} total, first 40 shown):\n${sample.slice(0, 12000)}`;
+  return (await chat(system, user, false)).trim();
 }
 
 // ---------------------------------------------------------------------------
