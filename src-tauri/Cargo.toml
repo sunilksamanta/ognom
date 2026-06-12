@@ -18,6 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# NOTE: `time` is pinned to 0.3.47 in Cargo.lock — 0.3.48 has trait-coherence
+# conflicts (E0119) that break tauri-utils/cookie/mongodb. If `cargo update`
+# pulls 0.3.48+ and the build breaks, re-pin: cargo update -p time --precise 0.3.47
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
