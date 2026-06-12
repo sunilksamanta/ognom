@@ -29,7 +29,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxOEUyMkE2ODFBMEUzQTgKUldTbzQ2Q0JwaUtPa1FZWUJLUk9sT1laMm9rVlN4MUNJbXBTLzR1VXM4TnpnaHhWUTU0bnJCekUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2NkZDMDREMkQ0RkU3NQpSV1IxL3RUU0JQeG1BUWhEYmQ3b0lGbWxyMU9jU3hnaHJKWFUyVko3T0Z2azBxUWF4ZWtnNktHUQo=",
       "endpoints": [
         "https://github.com/sunilksamanta/ognom/releases/latest/download/latest.json"
       ]

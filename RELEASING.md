@@ -8,9 +8,11 @@ manifest (`latest.json`) that running apps poll for self-updates.
 ## One-time setup (repo secrets)
 
 The updater artifacts must be signed. The keypair was generated locally with
-`tauri signer generate`:
+`tauri signer generate` (with a password — GitHub cannot store an empty
+secret, so passwordless keys do not work in CI):
 
 - **Private key**: `~/.tauri/ognom.key` *(on the machine that generated it — never commit this file)*
+- **Key password**: `~/.tauri/ognom.key.password`
 - **Public key**: already embedded in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
 
 Add two secrets under **GitHub repo → Settings → Secrets and variables →
@@ -19,17 +21,18 @@ Actions**:
 | Secret | Value |
 |---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | The full contents of `~/.tauri/ognom.key` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Empty string (the key was generated without a password) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The contents of `~/.tauri/ognom.key.password` |
 
 ```bash
 # convenient way to add them with the GitHub CLI
 gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/ognom.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/ognom.key.password
 ```
 
-> ⚠️ Back the private key up somewhere safe (password manager). If it is
-> lost, existing installs can no longer verify updates — you'd have to ship a
-> new pubkey and users would need to reinstall manually once.
+> ⚠️ Back up both the private key **and its password** somewhere safe
+> (password manager). If either is lost, existing installs can no longer
+> verify updates — you'd have to ship a new pubkey and users would need to
+> reinstall manually once.
 
 ## Cutting a release
 
@@ -66,7 +69,9 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
 key. Either export it:
 
 ```bash
-TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ognom.key) npm run tauri build
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ognom.key) \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat ~/.tauri/ognom.key.password) \
+npm run tauri build
 ```
 
 …or temporarily set `"createUpdaterArtifacts": false` if you just need an
