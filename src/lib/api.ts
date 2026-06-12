@@ -126,7 +126,9 @@ export interface IndexInfo {
   keys: Doc;
   unique: boolean;
   sparse: boolean;
+  hidden: boolean;
   ttlSeconds?: number | null;
+  partialFilter?: Doc | null;
 }
 
 export interface CollectionStats {
@@ -194,6 +196,10 @@ export const api = {
     name?: string;
     unique: boolean;
     ttlSeconds?: number;
+    sparse?: boolean;
+    hidden?: boolean;
+    partialFilterText?: string;
+    collationLocale?: string;
   }) => invoke<string>("create_index", args),
   dropIndex: (database: string, collection: string, name: string) =>
     invoke<void>("drop_index", { database, collection, name }),

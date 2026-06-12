@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Copy, CopyPlus, Eye, FileX2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ValueTree } from "@/components/explorer/ValueTree";
 import { idLabel, kindOf, leafText, toShellText, type BsonKind } from "@/lib/bson";
@@ -110,6 +117,70 @@ function RowActions({ doc, actions, className }: { doc: Doc; actions: DocActions
 // JSON view
 // ---------------------------------------------------------------------------
 
+function DocContextMenu({
+  doc,
+  actions,
+  asChild,
+  children,
+}: {
+  doc: Doc;
+  actions: DocActions;
+  asChild?: boolean;
+  children: ReactNode;
+}) {
+  const canMutate = "_id" in doc;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild={asChild}>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => actions.onView(doc)}>
+          <Eye />
+          View
+        </ContextMenuItem>
+        {actions.onEdit && canMutate && (
+          <ContextMenuItem onSelect={() => actions.onEdit!(doc)}>
+            <Pencil />
+            Edit
+          </ContextMenuItem>
+        )}
+        {actions.onDuplicate && (
+          <ContextMenuItem onSelect={() => actions.onDuplicate!(doc)}>
+            <CopyPlus />
+            Duplicate
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void copyText(toShellText(doc), "Document")}>
+          <Copy />
+          Copy as shell
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void copyText(JSON.stringify(doc, null, 2), "Document")}>
+          <Copy />
+          Copy as Extended JSON
+        </ContextMenuItem>
+        {"_id" in doc && (
+          <ContextMenuItem onSelect={() => void copyText(toShellText(doc._id), "_id")}>
+            <Copy />
+            Copy _id
+          </ContextMenuItem>
+        )}
+        {actions.onDelete && canMutate && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => actions.onDelete!(doc)}
+            >
+              <Trash2 />
+              Delete
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 const DocCard = memo(function DocCard({
   doc,
   index,
@@ -120,23 +191,25 @@ const DocCard = memo(function DocCard({
   actions: DocActions;
 }) {
   return (
-    <div className="group rounded-lg border bg-card transition-colors hover:border-border/80">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-        <span className="text-[11px] tabular-nums text-muted-foreground/70">#{index + 1}</span>
-        <span className="truncate font-mono text-[11px] text-muted-foreground">
-          {idLabel(doc)}
-        </span>
-        <div className="flex-1" />
-        <RowActions
-          doc={doc}
-          actions={actions}
-          className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-        />
+    <DocContextMenu doc={doc} actions={actions} asChild>
+      <div className="group rounded-lg border bg-card transition-colors hover:border-border/80">
+        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
+          <span className="text-[11px] tabular-nums text-muted-foreground/70">#{index + 1}</span>
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            {idLabel(doc)}
+          </span>
+          <div className="flex-1" />
+          <RowActions
+            doc={doc}
+            actions={actions}
+            className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+          />
+        </div>
+        <div className="overflow-x-auto px-3 py-2">
+          <ValueTree value={doc} />
+        </div>
       </div>
-      <div className="overflow-x-auto px-3 py-2">
-        <ValueTree value={doc} />
-      </div>
-    </div>
+    </DocContextMenu>
   );
 });
 
@@ -216,8 +289,8 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
         </thead>
         <tbody>
           {docs.map((doc, i) => (
+            <DocContextMenu key={i} doc={doc} actions={actions} asChild>
             <tr
-              key={i}
               onDoubleClick={() => actions.onView(doc)}
               className="group transition-colors odd:bg-muted/30 hover:bg-accent/60"
             >
@@ -238,6 +311,7 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
                 />
               </td>
             </tr>
+            </DocContextMenu>
           ))}
         </tbody>
       </table>

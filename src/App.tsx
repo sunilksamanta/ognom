@@ -35,6 +35,20 @@ function App() {
     };
   }, []);
 
+  // Disable the native browser context menu app-wide; custom menus are used
+  // instead. Editable text fields keep their native menu (copy/paste/spellcheck).
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"], .monaco-editor')) {
+        return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => window.removeEventListener("contextmenu", onContextMenu);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;

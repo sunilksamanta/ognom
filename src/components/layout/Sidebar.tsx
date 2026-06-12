@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   Database,
   Eye,
+  FolderOpen,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -12,10 +14,19 @@ import {
   Table2,
   Timer,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { useExplorer } from "@/stores/explorer";
 import { SIDEBAR_MAX, SIDEBAR_MIN, useSettings } from "@/stores/settings";
 import { formatBytes } from "@/lib/bson";
@@ -36,11 +47,17 @@ export function Sidebar() {
     sidebarFilter,
     setSidebarFilter,
     loadDatabases,
+    loadCollections,
     toggleDatabase,
     openCollection,
     tabs,
     activeTabId,
   } = useExplorer();
+
+  const copyName = (name: string) => {
+    void navigator.clipboard.writeText(name);
+    toast.success("Name copied");
+  };
 
   const { sidebarWidth, sidebarCollapsed, setSidebarWidth, toggleSidebar } = useSettings();
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
@@ -157,21 +174,44 @@ export function Sidebar() {
             );
             return (
               <div key={db.name}>
-                <button
-                  onClick={() => void toggleDatabase(db.name)}
-                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
-                >
-                  {isOpen ? (
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                  <Database className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-                  <span className="min-w-0 flex-1 truncate text-left font-medium">{db.name}</span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
-                    {formatBytes(db.sizeOnDisk)}
-                  </span>
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      onClick={() => void toggleDatabase(db.name)}
+                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <Database className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+                      <span className="min-w-0 flex-1 truncate text-left font-medium">
+                        {db.name}
+                      </span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                        {formatBytes(db.sizeOnDisk)}
+                      </span>
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuLabel className="max-w-[200px] truncate">{db.name}</ContextMenuLabel>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onSelect={() => {
+                        if (!expanded[db.name]) void toggleDatabase(db.name);
+                        void loadCollections(db.name);
+                      }}
+                    >
+                      <RefreshCw />
+                      Refresh
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => copyName(db.name)}>
+                      <Copy />
+                      Copy name
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
 
                 {isOpen && (
                   <div className="ml-[1.05rem] flex flex-col gap-px border-l pl-1.5">
@@ -184,19 +224,40 @@ export function Sidebar() {
                       const isActive =
                         activeTab?.database === db.name && activeTab?.collection === coll.name;
                       return (
-                        <button
-                          key={coll.name}
-                          onClick={() => openCollection(db.name, coll.name)}
-                          className={cn(
-                            "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors",
-                            isActive
-                              ? "bg-primary/15 font-medium text-primary"
-                              : "text-foreground/90 hover:bg-accent"
-                          )}
-                        >
-                          <CollIcon kind={coll.kind} />
-                          <span className="truncate">{coll.name}</span>
-                        </button>
+                        <ContextMenu key={coll.name}>
+                          <ContextMenuTrigger asChild>
+                            <button
+                              onClick={() => openCollection(db.name, coll.name)}
+                              className={cn(
+                                "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors",
+                                isActive
+                                  ? "bg-primary/15 font-medium text-primary"
+                                  : "text-foreground/90 hover:bg-accent"
+                              )}
+                            >
+                              <CollIcon kind={coll.kind} />
+                              <span className="truncate">{coll.name}</span>
+                            </button>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuLabel className="max-w-[200px] truncate">
+                              {coll.name}
+                            </ContextMenuLabel>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onSelect={() => openCollection(db.name, coll.name)}>
+                              <FolderOpen />
+                              Open
+                            </ContextMenuItem>
+                            <ContextMenuItem onSelect={() => void loadCollections(db.name)}>
+                              <RefreshCw />
+                              Refresh
+                            </ContextMenuItem>
+                            <ContextMenuItem onSelect={() => copyName(coll.name)}>
+                              <Copy />
+                              Copy name
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
                       );
                     })}
                     {collections[db.name] && colls.length === 0 && (

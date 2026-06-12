@@ -160,6 +160,7 @@ export function DocumentDialogs({
         }
         confirmLabel="Delete"
         destructive
+        requireAck
         busy={busy}
         onConfirm={async () => {
           if (state.type !== "delete") return;

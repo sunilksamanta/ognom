@@ -529,7 +529,9 @@ pub struct IndexInfo {
     pub keys: Value,
     pub unique: bool,
     pub sparse: bool,
+    pub hidden: bool,
     pub ttl_seconds: Option<u64>,
+    pub partial_filter: Option<Value>,
 }
 
 #[tauri::command]
@@ -550,12 +552,15 @@ pub async fn list_indexes(
                 keys: doc_to_value(m.keys),
                 unique: o.unique.unwrap_or(false),
                 sparse: o.sparse.unwrap_or(false),
+                hidden: o.hidden.unwrap_or(false),
                 ttl_seconds: o.expire_after.map(|d| d.as_secs()),
+                partial_filter: o.partial_filter_expression.map(doc_to_value),
             }
         })
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn create_index(
     database: String,
@@ -564,6 +569,10 @@ pub async fn create_index(
     name: Option<String>,
     unique: bool,
     ttl_seconds: Option<u64>,
+    sparse: Option<bool>,
+    hidden: Option<bool>,
+    partial_filter_text: Option<String>,
+    collation_locale: Option<String>,
     state: State<'_, AppState>,
 ) -> AppResult<String> {
     let client = current_client(&state).await?;
@@ -572,10 +581,38 @@ pub async fn create_index(
     if keys.is_empty() {
         return Err(AppError::Parse("index keys are required, e.g. { email: 1 }".into()));
     }
+
+    // Optional partial filter expression — only indexes documents matching it.
+    let partial_filter = match partial_filter_text {
+        Some(ref t) if !t.trim().is_empty() => {
+            let d = parse_doc_text(t)?;
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
+        }
+        _ => None,
+    };
+
+    // Case-insensitive (or locale-aware) collation via strength 2.
+    let collation = collation_locale
+        .filter(|l| !l.trim().is_empty())
+        .map(|locale| {
+            mongodb::options::Collation::builder()
+                .locale(locale)
+                .strength(mongodb::options::CollationStrength::Secondary)
+                .build()
+        });
+
     let options = IndexOptions::builder()
         .name(name.filter(|n| !n.trim().is_empty()))
         .unique(if unique { Some(true) } else { None })
         .expire_after(ttl_seconds.map(Duration::from_secs))
+        .sparse(sparse.filter(|b| *b))
+        .hidden(hidden.filter(|b| *b))
+        .partial_filter_expression(partial_filter)
+        .collation(collation)
         .build();
     let model = IndexModel::builder().keys(keys).options(options).build();
     let result = coll.create_index(model).await?;
