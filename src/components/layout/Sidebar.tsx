@@ -39,20 +39,21 @@ function CollIcon({ kind }: { kind: string }) {
 }
 
 export function Sidebar() {
-  const {
-    databases,
-    loadingDbs,
-    collections,
-    expanded,
-    sidebarFilter,
-    setSidebarFilter,
-    loadDatabases,
-    loadCollections,
-    toggleDatabase,
-    openCollection,
-    tabs,
-    activeTabId,
-  } = useExplorer();
+  const databases = useExplorer((s) => s.databases);
+  const loadingDbs = useExplorer((s) => s.loadingDbs);
+  const collections = useExplorer((s) => s.collections);
+  const expanded = useExplorer((s) => s.expanded);
+  const sidebarFilter = useExplorer((s) => s.sidebarFilter);
+  const setSidebarFilter = useExplorer((s) => s.setSidebarFilter);
+  const loadDatabases = useExplorer((s) => s.loadDatabases);
+  const loadCollections = useExplorer((s) => s.loadCollections);
+  const toggleDatabase = useExplorer((s) => s.toggleDatabase);
+  const openCollection = useExplorer((s) => s.openCollection);
+  // Select the active collection as primitives, not the whole tab object — so
+  // typing in an editor (which mutates the active tab) doesn't re-render the
+  // entire database/collection tree on every keystroke.
+  const activeDb = useExplorer((s) => s.tabs.find((t) => t.id === s.activeTabId)?.database);
+  const activeColl = useExplorer((s) => s.tabs.find((t) => t.id === s.activeTabId)?.collection);
 
   const copyName = (name: string) => {
     void navigator.clipboard.writeText(name);
@@ -67,7 +68,6 @@ export function Sidebar() {
     if (databases.length === 0) void loadDatabases();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
   const filter = sidebarFilter.trim().toLowerCase();
 
   const visibleDbs = databases.filter((db) => {
@@ -222,7 +222,7 @@ export function Sidebar() {
                     )}
                     {colls.map((coll) => {
                       const isActive =
-                        activeTab?.database === db.name && activeTab?.collection === coll.name;
+                        activeDb === db.name && activeColl === coll.name;
                       return (
                         <ContextMenu key={coll.name}>
                           <ContextMenuTrigger asChild>

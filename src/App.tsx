@@ -13,6 +13,7 @@ import { useConnections } from "@/stores/connections";
 import { useSettings } from "@/stores/settings";
 import { useStudio } from "@/stores/studio";
 import { StudioPane } from "@/components/studio/StudioPane";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { checkForUpdates } from "@/lib/updater";
 
 function App() {
@@ -81,11 +82,15 @@ function App() {
             <TopBar onOpenPalette={() => setPaletteOpen(true)} />
             <div className="flex min-h-0 flex-1">
               {terminator ? (
-                <StudioPane />
+                <ErrorBoundary>
+                  <StudioPane />
+                </ErrorBoundary>
               ) : (
                 <>
                   <Sidebar />
-                  <Workspace />
+                  <ErrorBoundary>
+                    <Workspace />
+                  </ErrorBoundary>
                 </>
               )}
             </div>

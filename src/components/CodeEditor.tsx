@@ -1,6 +1,6 @@
 import Editor, { OnMount } from "@monaco-editor/react";
 import { KeyCode, KeyMod } from "monaco-editor";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { ensureMonaco, MONO_FONT } from "@/lib/monaco";
 import { useTheme } from "@/components/theme-provider";
@@ -18,6 +18,12 @@ interface CodeEditorProps {
   lineNumbers?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /**
+   * Stable, unique model identity. With many editors mounted at once (aggregate
+   * stages, plus every open tab), giving each its own path keeps Monaco's
+   * per-model view state (scroll/cursor) from sharing one anonymous slot.
+   */
+  path?: string;
 }
 
 export function CodeEditor({
@@ -30,13 +36,18 @@ export function CodeEditor({
   lineNumbers = true,
   placeholder,
   autoFocus = false,
+  path,
 }: CodeEditorProps) {
   const { resolved } = useTheme();
   const runRef = useRef(onRun);
   runRef.current = onRun;
 
+  // NOTE: don't dispose the editor here — @monaco-editor/react owns the editor
+  // (and model) lifecycle and disposes them on unmount. Disposing it ourselves
+  // double-disposes, so the library's later setModel/dispose hits a dead editor
+  // ("InstantiationService has been disposed") and blanks the app — this is what
+  // crashed when reordering aggregate stages.
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
-  useEffect(() => () => editorRef.current?.dispose(), []);
 
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor;
@@ -55,6 +66,7 @@ export function CodeEditor({
     <div className={cn("overflow-hidden rounded-md border bg-card", className)}>
       <Editor
         height={height}
+        path={path}
         language="mongodb"
         theme={resolved === "dark" ? "ognom-dark" : "ognom-light"}
         value={value}

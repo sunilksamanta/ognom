@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertCircle,
@@ -38,11 +38,19 @@ const FIX_INSTRUCTION =
   "Fix any syntax or semantic errors in this query so it runs correctly.";
 
 export function ShellPane({ tab }: { tab: Tab }) {
-  const { patchShell, runShell } = useExplorer();
+  const patchShell = useExplorer((s) => s.patchShell);
+  const runShell = useExplorer((s) => s.runShell);
   const { shellHistory, clearShellHistory, shellEditorHeight, setShellEditorHeight } =
     useSettings();
   const apiKey = useStudio((s) => s.apiKey);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
+
+  // Stable across keystrokes so the memoized ResultsViewer doesn't rebuild
+  // the whole result set every time the query text changes.
+  const docActions = useMemo(
+    () => ({ onView: (doc: Doc) => setDialog({ type: "view", doc }) }),
+    []
+  );
 
   // Drag the handle under the editor to resize it (height persists in settings).
   const startResize = (e: React.PointerEvent) => {
@@ -193,6 +201,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
           height={shellEditorHeight}
           autoFocus
           placeholder={`db.${tab.collection}.find({ status: "active" }).sort({ createdAt: -1 }).limit(20)`}
+          path={`shell/${tab.id}`}
         />
         <div
           onPointerDown={startResize}
@@ -312,7 +321,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
           <ResultsViewer
             docs={outcome.docs}
             view={s.view}
-            actions={{ onView: (doc: Doc) => setDialog({ type: "view", doc }) }}
+            actions={docActions}
             emptyText="No documents returned"
           />
         </>

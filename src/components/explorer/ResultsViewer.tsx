@@ -328,7 +328,12 @@ interface ResultsViewerProps {
   emptyText?: string;
 }
 
-export function ResultsViewer({ docs, view, actions, emptyText }: ResultsViewerProps) {
+export const ResultsViewer = memo(function ResultsViewer({
+  docs,
+  view,
+  actions,
+  emptyText,
+}: ResultsViewerProps) {
   if (docs.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
@@ -351,4 +356,4 @@ export function ResultsViewer({ docs, view, actions, emptyText }: ResultsViewerP
       </div>
     </div>
   );
-}
+});

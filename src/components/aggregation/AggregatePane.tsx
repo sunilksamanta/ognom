@@ -33,7 +33,7 @@ import { DocumentDialogs, type DocDialogState } from "@/components/explorer/Docu
 import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
 import { newStage, useExplorer, type Stage, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Doc } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -96,7 +96,8 @@ function StageCard({
   index: number;
   total: number;
 }) {
-  const { patchAgg, runAggregate } = useExplorer();
+  const patchAgg = useExplorer((s) => s.patchAgg);
+  const runAggregate = useExplorer((s) => s.runAggregate);
   const stages = tab.agg.stages;
 
   const update = (patch: Partial<Stage>) =>
@@ -197,6 +198,7 @@ function StageCard({
             onRun={() => void runAggregate(tab.id)}
             height={Math.min(220, Math.max(64, stage.body.split("\n").length * 19 + 20))}
             lineNumbers={false}
+            path={`agg/${tab.id}/${stage.id}`}
           />
         </div>
       )}
@@ -205,12 +207,21 @@ function StageCard({
 }
 
 export function AggregatePane({ tab }: { tab: Tab }) {
-  const { patchAgg, runAggregate, setTabMode, patchShell } = useExplorer();
+  const patchAgg = useExplorer((s) => s.patchAgg);
+  const runAggregate = useExplorer((s) => s.runAggregate);
+  const setTabMode = useExplorer((s) => s.setTabMode);
+  const patchShell = useExplorer((s) => s.patchShell);
   const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
   const [explain, setExplain] = useState<ExplainRequest | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
   const a = tab.agg;
+
+  // Stable so the memoized ResultsViewer doesn't rebuild on stage-body edits.
+  const docActions = useMemo(
+    () => ({ onView: (doc: Doc) => setDialog({ type: "view", doc }) }),
+    []
+  );
 
   const openExplain = () => {
     const stages = a.stages
@@ -377,7 +388,7 @@ export function AggregatePane({ tab }: { tab: Tab }) {
           <ResultsViewer
             docs={a.docs}
             view={a.view}
-            actions={{ onView: (doc: Doc) => setDialog({ type: "view", doc }) }}
+            actions={docActions}
             emptyText="Pipeline returned no documents"
           />
         )}

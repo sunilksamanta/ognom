@@ -229,7 +229,8 @@ export function StudioChat({
   /** Restore a past chat's database + scope, then activate it. */
   onOpenSession: (session: ChatSession) => void;
 }) {
-  const { collections, loadCollections } = useExplorer();
+  const collections = useExplorer((s) => s.collections);
+  const loadCollections = useExplorer((s) => s.loadCollections);
   const apiKey = useStudio((s) => s.apiKey);
   const { sessions, activeId, newSession, setActive, addTurn, patchTurn, deleteSession, clearAll } =
     useChat();

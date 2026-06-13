@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { FileJson2, ListTree, SquareTerminal, TableProperties, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,7 +17,7 @@ const MODES: { id: TabMode; label: string; icon: typeof FileJson2; advanced?: bo
   { id: "shell", label: "Shell", icon: SquareTerminal, advanced: true },
 ];
 
-export function CollectionTab({ tab }: { tab: Tab }) {
+export const CollectionTab = memo(function CollectionTab({ tab }: { tab: Tab }) {
   const setTabMode = useExplorer((s) => s.setTabMode);
   const advancedMode = useSettings((s) => s.advancedMode);
   const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
@@ -102,4 +102,4 @@ export function CollectionTab({ tab }: { tab: Tab }) {
       <SchemaSheet tab={tab} open={schemaOpen} onOpenChange={setSchemaOpen} />
     </div>
   );
-}
+});

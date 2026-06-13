@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   ChevronLeft,
@@ -79,7 +79,8 @@ export function ViewToggle({
 }
 
 export function DocumentsPane({ tab }: { tab: Tab }) {
-  const { patchDocs, runFind } = useExplorer();
+  const patchDocs = useExplorer((s) => s.patchDocs);
+  const runFind = useExplorer((s) => s.runFind);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
   const [builderOpen, setBuilderOpen] = useState(false);
   const [explain, setExplain] = useState<ExplainRequest | null>(null);
@@ -104,12 +105,17 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
   const from = d.page * d.limit + 1;
   const to = d.page * d.limit + d.docs.length;
 
-  const actions = {
-    onView: (doc: Doc) => setDialog({ type: "view", doc }),
-    onEdit: (doc: Doc) => setDialog({ type: "edit", doc }),
-    onDuplicate: (doc: Doc) => setDialog({ type: "insert", template: doc }),
-    onDelete: (doc: Doc) => setDialog({ type: "delete", doc }),
-  };
+  // Stable identity so the memoized ResultsViewer doesn't re-render the result
+  // list on every keystroke in the filter / sort / projection inputs.
+  const actions = useMemo(
+    () => ({
+      onView: (doc: Doc) => setDialog({ type: "view", doc }),
+      onEdit: (doc: Doc) => setDialog({ type: "edit", doc }),
+      onDuplicate: (doc: Doc) => setDialog({ type: "insert", template: doc }),
+      onDelete: (doc: Doc) => setDialog({ type: "delete", doc }),
+    }),
+    []
+  );
 
   const optionsActive = d.sort.trim() !== "" || d.projection.trim() !== "";
 

@@ -99,6 +99,7 @@ export function DocumentDialogs({
               readOnly={state.type === "view"}
               height="46vh"
               autoFocus={state.type !== "view"}
+              path="dialog/document-editor"
             />
           )}
 

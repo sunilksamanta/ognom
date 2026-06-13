@@ -5,7 +5,10 @@ import { dragWindow } from "@/lib/window";
 import { cn } from "@/lib/utils";
 
 export function Workspace() {
-  const { tabs, activeTabId, setActiveTab, closeTab } = useExplorer();
+  const tabs = useExplorer((s) => s.tabs);
+  const activeTabId = useExplorer((s) => s.activeTabId);
+  const setActiveTab = useExplorer((s) => s.setActiveTab);
+  const closeTab = useExplorer((s) => s.closeTab);
 
   if (tabs.length === 0) {
     return (
