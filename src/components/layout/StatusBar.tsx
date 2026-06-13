@@ -6,7 +6,7 @@ import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { formatCount } from "@/lib/bson";
 
-export function StatusBar() {
+export function StatusBar({ onAbout }: { onAbout?: () => void }) {
   const { active, security } = useConnections();
   const { tabs, activeTabId } = useExplorer();
   const tab = tabs.find((t) => t.id === activeTabId);
@@ -54,7 +54,17 @@ export function StatusBar() {
 
       <div className="flex-1" />
       {stats && <span className="tabular-nums">{stats}</span>}
-      <span className="text-muted-foreground/60">Ognom{version ? ` ${version}` : ""}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onAbout}
+            className="font-medium text-primary/90 transition-colors hover:text-primary"
+          >
+            Ognom{version ? ` ${version}` : ""}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>About Ognom</TooltipContent>
+      </Tooltip>
     </footer>
   );
 }

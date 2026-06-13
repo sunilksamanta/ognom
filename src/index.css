@@ -4,89 +4,90 @@
 
 @layer base {
   :root {
-    /* ── Ognom light · "paper & emerald" ─────────────────────── */
-    --background: 220 25% 97%;
-    --foreground: 224 25% 14%;
+    /* ── Ognom light · MongoDB spring green on a calm teal-white ── */
+    --background: 190 30% 97%;
+    --foreground: 196 48% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 224 25% 14%;
+    --card-foreground: 196 48% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 25% 14%;
+    --popover-foreground: 196 48% 12%;
 
-    --primary: 158 72% 34%;
-    --primary-foreground: 0 0% 100%;
+    /* Spring green held in reserve for actions; dark text rides on it. */
+    --primary: 149 100% 33%;
+    --primary-foreground: 153 100% 5%;
 
-    --secondary: 220 18% 92%;
-    --secondary-foreground: 224 20% 22%;
+    --secondary: 190 22% 92%;
+    --secondary-foreground: 196 30% 22%;
 
-    --muted: 220 18% 93%;
-    --muted-foreground: 220 10% 44%;
+    --muted: 190 20% 93%;
+    --muted-foreground: 196 12% 42%;
 
-    --accent: 220 20% 90%;
-    --accent-foreground: 224 25% 14%;
+    --accent: 190 24% 90%;
+    --accent-foreground: 196 48% 12%;
 
-    --destructive: 0 68% 48%;
+    --destructive: 5 72% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --warning: 38 92% 42%;
-    --info: 212 80% 46%;
+    --warning: 38 84% 40%;
+    --info: 206 72% 44%;
 
-    --border: 220 16% 87%;
-    --input: 220 16% 84%;
-    --ring: 158 72% 34%;
+    --border: 194 22% 86%;
+    --input: 194 24% 82%;
+    --ring: 149 100% 33%;
 
-    --radius: 0.55rem;
+    --radius: 0.5625rem;
 
-    /* BSON value colors */
-    --bson-key: 212 70% 40%;
-    --bson-string: 28 72% 40%;
-    --bson-number: 265 60% 50%;
-    --bson-boolean: 335 65% 46%;
-    --bson-null: 220 9% 52%;
-    --bson-oid: 158 62% 32%;
-    --bson-date: 192 72% 34%;
+    /* BSON value colors (harmonized syntax — darkened for light) */
+    --bson-key: 196 26% 30%;
+    --bson-string: 142 55% 30%;
+    --bson-number: 263 55% 50%;
+    --bson-boolean: 38 82% 36%;
+    --bson-null: 196 10% 48%;
+    --bson-oid: 150 100% 27%;
+    --bson-date: 197 70% 35%;
   }
 
   .dark {
-    /* ── Ognom dark · "ink & emerald" ────────────────────────── */
-    --background: 222 22% 6%;
-    --foreground: 214 22% 88%;
+    /* ── Ognom dark · MongoDB Slate-Blue canvas + spring green ──── */
+    --background: 196 100% 7.5%; /* #001C26 — MongoDB Slate Blue */
+    --foreground: 160 22% 92%; /* #E6EFEC */
 
-    --card: 222 19% 9%;
-    --card-foreground: 214 22% 88%;
-    --popover: 222 19% 10%;
-    --popover-foreground: 214 22% 88%;
+    --card: 196 85% 10%; /* #042430 — surfaces / panels */
+    --card-foreground: 160 22% 92%;
+    --popover: 195 77% 14%; /* #08303D — raised: inputs, popovers */
+    --popover-foreground: 160 22% 92%;
 
-    --primary: 155 65% 45%;
-    --primary-foreground: 160 90% 6%;
+    --primary: 145 100% 46%; /* #00ED64 — spring green, reserved */
+    --primary-foreground: 153 100% 5%; /* #00160C */
 
-    --secondary: 221 16% 14%;
-    --secondary-foreground: 214 18% 80%;
+    --secondary: 195 77% 14%;
+    --secondary-foreground: 160 22% 92%;
 
-    --muted: 221 16% 13%;
-    --muted-foreground: 220 9% 56%;
+    --muted: 196 85% 10%;
+    --muted-foreground: 168 14% 66%; /* #9DB2AE */
 
-    --accent: 221 16% 17%;
-    --accent-foreground: 214 22% 90%;
+    --accent: 195 67% 17%; /* #0E3A48 — hover well */
+    --accent-foreground: 160 22% 92%;
 
-    --destructive: 0 66% 56%;
+    --destructive: 5 80% 65%; /* #ED6A5E */
     --destructive-foreground: 0 0% 100%;
 
-    --warning: 40 90% 58%;
-    --info: 210 85% 66%;
+    --warning: 38 76% 62%; /* #E8B153 */
+    --info: 206 81% 65%; /* #5FB0EE — Studio / AI sky-blue */
 
-    --border: 220 14% 16%;
-    --input: 220 14% 19%;
-    --ring: 155 65% 45%;
+    --border: 194 32% 15%; /* hairline */
+    --input: 194 34% 18%;
+    --ring: 145 100% 46%;
 
-    /* BSON value colors */
-    --bson-key: 210 65% 71%;
-    --bson-string: 34 68% 64%;
-    --bson-number: 265 65% 75%;
-    --bson-boolean: 335 70% 69%;
-    --bson-null: 220 9% 50%;
-    --bson-oid: 155 55% 56%;
-    --bson-date: 190 65% 60%;
+    /* BSON value colors (harmonized, low-neon syntax) */
+    --bson-key: 164 14% 79%; /* #C3D2CE */
+    --bson-string: 142 53% 67%; /* #7FD8A0 */
+    --bson-number: 263 71% 80%; /* #C2A6F0 */
+    --bson-boolean: 38 76% 62%; /* #E8B153 */
+    --bson-null: 170 11% 44%; /* #647B77 */
+    --bson-oid: 145 100% 46%; /* #00ED64 */
+    --bson-date: 197 73% 66%; /* #6BC5E8 */
   }
 
   * {
@@ -100,8 +101,7 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+    @apply bg-background text-foreground font-sans antialiased;
     overscroll-behavior: none;
   }
 
@@ -146,7 +146,7 @@
     user-select: none;
   }
 
-  /* Soft emerald wash used on the welcome screen, empty states, splash. */
+  /* Soft spring-green wash used on the welcome screen, empty states, splash. */
   .app-gradient {
     background-image:
       radial-gradient(55% 45% at 18% 22%, hsl(var(--primary) / 0.07), transparent 65%),

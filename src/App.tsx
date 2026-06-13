@@ -89,7 +89,7 @@ function App() {
                 </>
               )}
             </div>
-            <StatusBar />
+            <StatusBar onAbout={() => setAboutOpen(true)} />
             <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
           </>
         ) : (

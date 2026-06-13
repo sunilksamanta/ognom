@@ -16,26 +16,26 @@ export function OgnomMark({ className }: { className?: string }) {
     <svg viewBox="0 0 64 64" className={className} aria-hidden>
       <defs>
         <linearGradient id="ognom-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#34D399" />
-          <stop offset="100%" stopColor="#0E9F6E" />
+          <stop offset="0%" stopColor="#4DF58E" />
+          <stop offset="100%" stopColor="#00B85A" />
         </linearGradient>
       </defs>
       <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#ognom-g)" />
       <path
         d="M25 18c-5 0-7 2.6-7 7v4.4c0 2.4-1.2 3.6-3.6 3.6 2.4 0 3.6 1.2 3.6 3.6V41c0 4.4 2 7 7 7"
         fill="none"
-        stroke="#06281A"
+        stroke="#00160C"
         strokeWidth="4.4"
         strokeLinecap="round"
       />
       <path
         d="M39 18c5 0 7 2.6 7 7v4.4c0 2.4 1.2 3.6 3.6 3.6-2.4 0-3.6 1.2-3.6 3.6V41c0 4.4-2 7-7 7"
         fill="none"
-        stroke="#06281A"
+        stroke="#00160C"
         strokeWidth="4.4"
         strokeLinecap="round"
       />
-      <circle cx="32" cy="33" r="4.6" fill="#06281A" />
+      <circle cx="32" cy="33" r="4.6" fill="#00160C" />
     </svg>
   );
 }

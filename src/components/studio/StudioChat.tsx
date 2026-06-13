@@ -234,7 +234,6 @@ export function StudioChat({
   const { sessions, activeId, newSession, setActive, addTurn, patchTurn, deleteSession, clearAll } =
     useChat();
 
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[] | null>(null);
@@ -378,8 +377,8 @@ export function StudioChat({
     }
   };
 
-  const send = async (raw?: string) => {
-    const prompt = (raw ?? input).trim();
+  const send = async (raw: string) => {
+    const prompt = raw.trim();
     if (!prompt || busy) return;
     if (!apiKey) {
       toast.error("Add your OpenAI API key in Settings → Prompts & AI to use Studio");
@@ -394,7 +393,6 @@ export function StudioChat({
 
     addTurn(sid, { role: "user", text: prompt });
     const aid = addTurn(sid, { role: "assistant", pending: true });
-    setInput("");
     setSuggestions(null);
     setNewTopicHint(false);
     setBusy(true);
@@ -569,67 +567,16 @@ export function StudioChat({
           </div>
         )}
 
-        {/* composer */}
-        <div className="shrink-0 border-t bg-card/40 px-4 py-3">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                disabled={busy || suggesting}
-                onClick={() => void loadSuggestions()}
-                className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
-              >
-                {suggesting ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Lightbulb className="h-3 w-3" />
-                )}
-                Suggest questions
-              </button>
-              {(suggestions ?? samples).map((p) => (
-                <button
-                  key={p}
-                  disabled={busy}
-                  onClick={() => void send(p)}
-                  className="rounded-full border bg-card px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-end gap-2">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-                rows={1}
-                placeholder={
-                  multi
-                    ? `Ask across ${database} — "orders per customer as a bar chart"`
-                    : `Ask anything about ${scope} — "count orders by status as a pie chart"`
-                }
-                className="max-h-32 min-h-[40px] flex-1 resize-none rounded-md border border-primary/30 bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                disabled={busy}
-              />
-              <Button
-                className="h-10 gap-2"
-                disabled={busy || !input.trim()}
-                onClick={() => void send()}
-              >
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <SendHorizonal className="h-4 w-4" />
-                )}
-                Send
-              </Button>
-            </div>
-          </div>
-        </div>
+        <Composer
+          busy={busy}
+          multi={multi}
+          database={database}
+          scope={scope}
+          suggestions={suggestions ?? samples}
+          suggesting={suggesting}
+          onSuggest={() => void loadSuggestions()}
+          onSend={(t) => void send(t)}
+        />
       </div>
 
       <DocumentDialogs
@@ -777,6 +724,96 @@ function HistoryRail({
 // ---------------------------------------------------------------------------
 // turns
 // ---------------------------------------------------------------------------
+
+/**
+ * Isolated composer: holds its own draft state so keystrokes re-render only
+ * this box, never the (potentially huge) transcript above it.
+ */
+function Composer({
+  busy,
+  multi,
+  database,
+  scope,
+  suggestions,
+  suggesting,
+  onSuggest,
+  onSend,
+}: {
+  busy: boolean;
+  multi: boolean;
+  database: string;
+  scope: string;
+  suggestions: string[];
+  suggesting: boolean;
+  onSuggest: () => void;
+  onSend: (text: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const submit = () => {
+    const t = text.trim();
+    if (!t || busy) return;
+    setText("");
+    onSend(t);
+  };
+  return (
+    <div className="shrink-0 border-t bg-card/40 px-4 py-3">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            disabled={busy || suggesting}
+            onClick={onSuggest}
+            className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+          >
+            {suggesting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Lightbulb className="h-3 w-3" />
+            )}
+            Suggest questions
+          </button>
+          {suggestions.map((p) => (
+            <button
+              key={p}
+              disabled={busy}
+              onClick={() => onSend(p)}
+              className="rounded-full border bg-card px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-end gap-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            rows={1}
+            placeholder={
+              multi
+                ? `Ask across ${database} — "orders per customer as a bar chart"`
+                : `Ask anything about ${scope} — "count orders by status as a pie chart"`
+            }
+            className="max-h-32 min-h-[40px] flex-1 resize-none rounded-md border border-primary/30 bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            disabled={busy}
+          />
+          <Button className="h-10 gap-2" disabled={busy || !text.trim()} onClick={submit}>
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <SendHorizonal className="h-4 w-4" />
+            )}
+            Send
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function UserBubble({ text }: { text: string }) {
   return (
