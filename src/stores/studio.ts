@@ -1,17 +1,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-/** "normal" → fast model · "deep" → reasoning model. */
+/** "normal" → fast, minimal reasoning · "deep" → reasoning enabled. */
 export type AiMode = "normal" | "deep";
 
-export const DEFAULT_MODELS: Record<AiMode, string> = {
-  normal: "gpt-5.4-nano",
-  deep: "gpt-5.4-mini",
-};
+/** The single OpenAI model Studio uses (reasoning is toggled per mode). */
+export const DEFAULT_MODEL = "gpt-5.4-nano";
 
 export const AI_MODE_META: Record<AiMode, { label: string; reasoning: boolean; hint: string }> = {
-  normal: { label: "Normal mode", reasoning: false, hint: "fast" },
-  deep: { label: "Deep Think mode", reasoning: true, hint: "reasoning" },
+  normal: { label: "Normal mode", reasoning: false, hint: "fast · minimal reasoning" },
+  deep: { label: "Deep Think mode", reasoning: true, hint: "reasoning enabled" },
 };
 
 interface StudioState {
@@ -19,13 +17,12 @@ interface StudioState {
   terminator: boolean;
   apiKey: string;
   aiMode: AiMode;
-  /** Editable model ids per mode (OpenAI). Defaults restorable any time. */
-  modelNormal: string;
-  modelDeep: string;
+  /** Editable OpenAI model id. Deep Think turns reasoning on for THIS model. */
+  model: string;
   setTerminator: (on: boolean) => void;
   setApiKey: (key: string) => void;
   setAiMode: (mode: AiMode) => void;
-  setModel: (mode: AiMode, model: string) => void;
+  setModel: (model: string) => void;
 }
 
 export const useStudio = create<StudioState>()(
@@ -34,24 +31,31 @@ export const useStudio = create<StudioState>()(
       terminator: false,
       apiKey: "",
       aiMode: "normal",
-      modelNormal: DEFAULT_MODELS.normal,
-      modelDeep: DEFAULT_MODELS.deep,
+      model: DEFAULT_MODEL,
       setTerminator: (on) => set({ terminator: on }),
       setApiKey: (key) => set({ apiKey: key.trim() }),
       setAiMode: (mode) => set({ aiMode: mode }),
-      setModel: (mode, model) =>
-        set(
-          mode === "normal"
-            ? { modelNormal: model.trim() || DEFAULT_MODELS.normal }
-            : { modelDeep: model.trim() || DEFAULT_MODELS.deep }
-        ),
+      setModel: (model) => set({ model: model.trim() || DEFAULT_MODEL }),
     }),
-    { name: "ognom-studio" }
+    {
+      name: "ognom-studio",
+      version: 2,
+      // v1 had separate modelNormal/modelDeep; collapse to a single model.
+      migrate: (persisted: unknown, version) => {
+        const state = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 2) {
+          const legacy = state.modelNormal;
+          state.model = typeof legacy === "string" && legacy.trim() ? legacy : DEFAULT_MODEL;
+          delete state.modelNormal;
+          delete state.modelDeep;
+        }
+        return state as unknown as StudioState;
+      },
+    }
   )
 );
 
 /** Resolve the active model id + reasoning flag for the current mode. */
-export function activeAiConfig(s: Pick<StudioState, "aiMode" | "modelNormal" | "modelDeep">) {
-  const model = s.aiMode === "normal" ? s.modelNormal : s.modelDeep;
-  return { model, reasoning: AI_MODE_META[s.aiMode].reasoning };
+export function activeAiConfig(s: Pick<StudioState, "aiMode" | "model">) {
+  return { model: s.model, reasoning: AI_MODE_META[s.aiMode].reasoning };
 }

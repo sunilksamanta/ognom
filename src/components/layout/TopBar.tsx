@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ChevronDown, Cpu, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
+import { ChevronDown, CircleHelp, Cpu, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { HelpDialog } from "@/components/HelpDialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OgnomMark } from "@/components/WelcomeScreen";
 import { ConnectionManager } from "@/components/connections/ConnectionManager";
@@ -23,6 +24,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { terminator, setTerminator } = useStudio();
   const [managerOpen, setManagerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   return (
@@ -114,6 +116,15 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
 
       <Tooltip>
         <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setHelpOpen(true)}>
+            <CircleHelp className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Help &amp; examples</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSettingsOpen(true)}>
             <Settings2 className="h-4 w-4" />
           </Button>
@@ -139,6 +150,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
 
       <ConnectionManager open={managerOpen} onOpenChange={setManagerOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
       <ConfirmDialog
         open={confirmDisconnect}
         onOpenChange={setConfirmDisconnect}

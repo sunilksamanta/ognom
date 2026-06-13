@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettings } from "@/stores/settings";
-import { useStudio, AI_MODE_META, DEFAULT_MODELS, type AiMode } from "@/stores/studio";
+import { useStudio, AI_MODE_META, DEFAULT_MODEL, type AiMode } from "@/stores/studio";
 import { checkForUpdates } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 
@@ -119,26 +119,40 @@ function ApiKeyField() {
   );
 }
 
-function ModelField({ mode }: { mode: AiMode }) {
-  const { modelNormal, modelDeep, setModel } = useStudio();
-  const value = mode === "normal" ? modelNormal : modelDeep;
-  const isDefault = value === DEFAULT_MODELS[mode];
+function ModelField() {
+  const { model, setModel } = useStudio();
+  // Local draft so typing doesn't hit the persisted store on every keystroke
+  // (laggy) and an empty field doesn't instantly snap back to the default.
+  const [draft, setDraft] = useState(model);
+  useEffect(() => setDraft(model), [model]);
+
+  const commit = () => {
+    const next = draft.trim() || DEFAULT_MODEL;
+    setDraft(next);
+    if (next !== model) setModel(next);
+  };
+
   return (
     <div className="flex items-center gap-2">
       <Input
-        value={value}
-        onChange={(e) => setModel(mode, e.target.value)}
-        placeholder={DEFAULT_MODELS[mode]}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        placeholder={DEFAULT_MODEL}
         className="h-8 w-56 font-mono text-xs"
         spellCheck={false}
       />
-      {!isDefault && (
+      {draft.trim() !== DEFAULT_MODEL && (
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-muted-foreground"
-          title={`Reset to ${DEFAULT_MODELS[mode]}`}
-          onClick={() => setModel(mode, DEFAULT_MODELS[mode])}
+          title={`Reset to ${DEFAULT_MODEL}`}
+          onClick={() => {
+            setDraft(DEFAULT_MODEL);
+            setModel(DEFAULT_MODEL);
+          }}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
@@ -242,19 +256,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   backend — never through the webview.
                 </p>
               </div>
-              <Row
-                label="Normal mode model"
-                hint={`Fast everyday model · default ${DEFAULT_MODELS.normal}`}
-              >
-                <ModelField mode="normal" />
+              <Row label="Model" hint={`OpenAI model for Studio · default ${DEFAULT_MODEL}`}>
+                <ModelField />
               </Row>
               <Row
-                label="Deep Think mode model"
-                hint={`Reasoning model for hard queries · default ${DEFAULT_MODELS.deep}`}
+                label="Reasoning"
+                hint="Deep Think reasons harder on the same model; Normal stays fast"
               >
-                <ModelField mode="deep" />
-              </Row>
-              <Row label="Active mode" hint="Which model Studio uses right now">
                 <AiModeSwitch />
               </Row>
             </div>

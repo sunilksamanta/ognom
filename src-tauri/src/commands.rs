@@ -1059,8 +1059,18 @@ pub async fn save_file(path: String, contents_base64: String) -> AppResult<()> {
 // Ognom Studio — AI chat proxy
 // ---------------------------------------------------------------------------
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatResult {
+    pub content: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+}
+
 /// Proxy a chat completion to OpenAI from the backend (no CORS, key stays
-/// out of the webview's network layer). Returns the assistant message text.
+/// out of the webview's network layer). Returns the assistant message text
+/// plus token usage so the UI can surface how much was spent.
 #[tauri::command]
 pub async fn ai_chat(
     api_key: String,
@@ -1069,7 +1079,7 @@ pub async fn ai_chat(
     user: String,
     json_mode: bool,
     reasoning: bool,
-) -> AppResult<String> {
+) -> AppResult<AiChatResult> {
     if api_key.trim().is_empty() {
         return Err(AppError::Parse("OpenAI API key is not set — add it in Studio settings".into()));
     }
@@ -1084,9 +1094,10 @@ pub async fn ai_chat(
     if json_mode {
         body["response_format"] = json!({ "type": "json_object" });
     }
-    if reasoning {
-        body["reasoning_effort"] = json!("medium");
-    }
+    // Same model in both modes — Deep Think just reasons harder. "none" keeps
+    // Normal fast; "high" turns on reasoning. (gpt-5.4 supports
+    // none/low/medium/high/xhigh — not "minimal".)
+    body["reasoning_effort"] = json!(if reasoning { "high" } else { "none" });
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -1115,12 +1126,20 @@ pub async fn ai_chat(
         return Err(AppError::Parse(format!("OpenAI ({status}): {msg}")));
     }
 
-    payload
+    let content = payload
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| AppError::Parse("OpenAI returned an empty response".into()))
+        .ok_or_else(|| AppError::Parse("OpenAI returned an empty response".into()))?;
+
+    let usage = |key: &str| payload.pointer(&format!("/usage/{key}")).and_then(|v| v.as_u64()).unwrap_or(0);
+    Ok(AiChatResult {
+        content,
+        input_tokens: usage("prompt_tokens"),
+        output_tokens: usage("completion_tokens"),
+        total_tokens: usage("total_tokens"),
+    })
 }
 
 // ---------------------------------------------------------------------------

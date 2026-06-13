@@ -30,7 +30,8 @@ import { useExplorer, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useStudio } from "@/stores/studio";
 import { api, errMsg, type Doc } from "@/lib/api";
-import { optimizeQuery, QUICK_PROMPTS } from "@/lib/ai";
+import { optimizeQuery, QUICK_PROMPTS, type TokenUsage } from "@/lib/ai";
+import { TokenBadge } from "@/components/TokenBadge";
 
 const FIX_INSTRUCTION =
   QUICK_PROMPTS.find((p) => p.id === "fix")?.instruction ??
@@ -38,15 +39,33 @@ const FIX_INSTRUCTION =
 
 export function ShellPane({ tab }: { tab: Tab }) {
   const { patchShell, runShell } = useExplorer();
-  const { shellHistory, clearShellHistory } = useSettings();
+  const { shellHistory, clearShellHistory, shellEditorHeight, setShellEditorHeight } =
+    useSettings();
   const apiKey = useStudio((s) => s.apiKey);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
+
+  // Drag the handle under the editor to resize it (height persists in settings).
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = shellEditorHeight;
+    const onMove = (ev: PointerEvent) => setShellEditorHeight(startH + (ev.clientY - startY));
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // ── AI optimizer state (developer-facing; lives here, not in Studio) ──
   const [fields, setFields] = useState<string[]>([]);
   const [thinking, setThinking] = useState(false);
   const [notes, setNotes] = useState<string | null>(null);
   const [suggested, setSuggested] = useState<string | null>(null);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
 
   const s = tab.shell;
   const outcome = s.outcome;
@@ -69,6 +88,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
     setThinking(true);
     setNotes(null);
     setSuggested(null);
+    setUsage(null);
     try {
       const result = await optimizeQuery({
         query: s.text,
@@ -79,6 +99,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
         error: s.error,
       });
       setNotes(result.notes);
+      setUsage(result.usage);
       setSuggested(
         result.query && result.query.trim() !== s.text.trim() ? result.query : null
       );
@@ -100,6 +121,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
   const dismissAi = () => {
     setNotes(null);
     setSuggested(null);
+    setUsage(null);
   };
 
   return (
@@ -162,16 +184,23 @@ export function ShellPane({ tab }: { tab: Tab }) {
         </Button>
       </div>
 
-      {/* editor */}
-      <div className="shrink-0 p-3 pb-2">
+      {/* editor (drag the handle below to resize) */}
+      <div className="shrink-0 px-3 pt-3">
         <CodeEditor
           value={s.text}
           onChange={(text) => patchShell(tab.id, { text })}
           onRun={() => void runShell(tab.id)}
-          height={150}
+          height={shellEditorHeight}
           autoFocus
           placeholder={`db.${tab.collection}.find({ status: "active" }).sort({ createdAt: -1 }).limit(20)`}
         />
+        <div
+          onPointerDown={startResize}
+          className="group flex h-3 cursor-ns-resize items-center justify-center"
+          title="Drag to resize the editor"
+        >
+          <div className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-primary/50" />
+        </div>
       </div>
 
       {/* outcome */}
@@ -218,6 +247,7 @@ export function ShellPane({ tab }: { tab: Tab }) {
             <span className="font-medium">AI assistant</span>
             {thinking && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
             <div className="flex-1" />
+            {usage && <TokenBadge usage={usage} className="mr-1 text-[11px]" />}
             {!thinking && (
               <button
                 onClick={dismissAi}

@@ -179,6 +179,13 @@ export interface ShellOutcome {
   appliedDefaultLimit: boolean;
 }
 
+export interface AiChatResult {
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export const api = {
   // connections
   securityInfo: () => invoke<SecurityInfo>("security_info"),
@@ -270,7 +277,7 @@ export const api = {
     user: string;
     jsonMode: boolean;
     reasoning: boolean;
-  }) => invoke<string>("ai_chat", args),
+  }) => invoke<AiChatResult>("ai_chat", args),
 
   // shell
   runShell: (database: string, text: string) => invoke<ShellOutcome>("run_shell", { database, text }),
