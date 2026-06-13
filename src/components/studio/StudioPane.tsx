@@ -19,7 +19,6 @@ import {
   KeyRound,
   Lightbulb,
   Loader2,
-  Play,
   SendHorizonal,
   Table2,
   Zap,
@@ -37,20 +36,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CodeEditor } from "@/components/CodeEditor";
 import { ResultsViewer } from "@/components/explorer/ResultsViewer";
 import { ViewToggle } from "@/components/explorer/DocumentsPane";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
 import { CanvasChart, type CanvasChartHandle, type ChartData, type ChartType } from "@/components/studio/CanvasChart";
 import { useExplorer } from "@/stores/explorer";
+import { useSettings } from "@/stores/settings";
 import { useStudio, AI_MODE_META, DEFAULT_MODELS, type AiMode } from "@/stores/studio";
-import { api, errMsg, type Doc, type ShellOutcome } from "@/lib/api";
+import { api, errMsg, type Doc } from "@/lib/api";
 import {
   generateVizPlan,
-  optimizeQuery,
   suggestPrompts,
   summarizeResults,
-  QUICK_PROMPTS,
   type VizPlan,
 } from "@/lib/ai";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -184,22 +181,23 @@ const SAMPLE_PROMPTS = [
 // Studio
 // ---------------------------------------------------------------------------
 
-type StudioTab = "visualize" | "optimize";
-
 export function StudioPane() {
-  const { databases, collections, loadDatabases, loadCollections } = useExplorer();
-  const { apiKey, setApiKey, aiMode, setAiMode, modelNormal, modelDeep } = useStudio();
+  const { databases, collections, loadDatabases, loadCollections, openShellWithQuery } =
+    useExplorer();
+  const { apiKey, setApiKey, aiMode, setAiMode, modelNormal, modelDeep, setTerminator } =
+    useStudio();
+  const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
 
   const [database, setDatabase] = useState("");
   const [collection, setCollection] = useState("");
   const [fields, setFields] = useState<string[]>([]);
-  const [tab, setTab] = useState<StudioTab>("visualize");
-  // Bumped counter so re-sending the same query still re-seeds the editor.
-  const [optimizeSeed, setOptimizeSeed] = useState<{ query: string; n: number } | null>(null);
 
-  const sendToOptimize = (query: string) => {
-    setOptimizeSeed((s) => ({ query, n: (s?.n ?? 0) + 1 }));
-    setTab("optimize");
+  // Hand a generated query over to the developer Shell (normal mode) to
+  // optimize it there. Studio (Terminator) stays purely no-code/visualize.
+  const optimizeInShell = (query: string) => {
+    setAdvancedMode(true);
+    openShellWithQuery(database, collection, query);
+    setTerminator(false);
   };
 
   useEffect(() => {
@@ -260,32 +258,6 @@ export function StudioPane() {
           </SelectContent>
         </Select>
 
-        <div className="mx-1 h-5 w-px bg-border" />
-
-        {/* tab switch */}
-        <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
-          {(
-            [
-              { id: "visualize", label: "Visualize", icon: BarChart3 },
-              { id: "optimize", label: "Optimize", icon: Gauge },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
-                tab === t.id
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <t.icon className="h-3.5 w-3.5" />
-              {t.label}
-            </button>
-          ))}
-        </div>
-
         <div className="flex-1" />
 
         {/* AI mode */}
@@ -331,19 +303,12 @@ export function StudioPane() {
             </p>
           </div>
         </div>
-      ) : tab === "visualize" ? (
+      ) : (
         <VisualizeTab
           database={database}
           collection={collection}
           fields={fields}
-          onSendToOptimize={sendToOptimize}
-        />
-      ) : (
-        <OptimizeTab
-          database={database}
-          collection={collection}
-          fields={fields}
-          seed={optimizeSeed}
+          onOptimize={optimizeInShell}
         />
       )}
     </div>
@@ -416,12 +381,12 @@ function VisualizeTab({
   database,
   collection,
   fields,
-  onSendToOptimize,
+  onOptimize,
 }: {
   database: string;
   collection: string;
   fields: string[];
-  onSendToOptimize: (query: string) => void;
+  onOptimize: (query: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -620,12 +585,12 @@ function VisualizeTab({
                         variant="outline"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => onSendToOptimize(planToShell(plan, collection))}
+                        onClick={() => onOptimize(planToShell(plan, collection))}
                       >
                         <Gauge className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Send to Optimize</TooltipContent>
+                    <TooltipContent>Optimize in Shell</TooltipContent>
                   </Tooltip>
                 </div>
               </div>
@@ -746,225 +711,6 @@ function VisualizeTab({
         state={dialog}
         onClose={() => setDialog({ type: "closed" })}
         onMutated={() => {}}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Optimize — run a query, then improve it with AI
-// ---------------------------------------------------------------------------
-
-function OptimizeTab({
-  database,
-  collection,
-  fields,
-  seed,
-}: {
-  database: string;
-  collection: string;
-  fields: string[];
-  seed: { query: string; n: number } | null;
-}) {
-  const [query, setQuery] = useState(`db.${collection}.find({})`);
-  const [outcome, setOutcome] = useState<ShellOutcome | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [thinking, setThinking] = useState(false);
-  const [notes, setNotes] = useState<string | null>(null);
-  const [suggested, setSuggested] = useState<string | null>(null);
-  const [view, setView] = useState<"json" | "table">("json");
-  const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
-
-  // Follow collection switches, but never clobber user edits.
-  const lastColl = useRef(collection);
-  useEffect(() => {
-    if (collection !== lastColl.current) {
-      lastColl.current = collection;
-      setQuery(`db.${collection}.find({})`);
-      setOutcome(null);
-      setError(null);
-      setNotes(null);
-      setSuggested(null);
-    }
-  }, [collection]);
-
-  // Queries handed over from Visualize ("Send to Optimize").
-  const lastSeed = useRef(0);
-  useEffect(() => {
-    if (seed && seed.n !== lastSeed.current) {
-      lastSeed.current = seed.n;
-      setQuery(seed.query);
-      setOutcome(null);
-      setError(null);
-      setNotes(null);
-      setSuggested(null);
-    }
-  }, [seed]);
-
-  const run = async (text?: string) => {
-    const q = text ?? query;
-    setRunning(true);
-    setError(null);
-    try {
-      setOutcome(await api.runShell(database, q));
-    } catch (e) {
-      setError(errMsg(e));
-      setOutcome(null);
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const ask = async (instruction: string) => {
-    setThinking(true);
-    setNotes(null);
-    setSuggested(null);
-    try {
-      const result = await optimizeQuery({
-        query,
-        instruction,
-        database,
-        collection,
-        fields,
-        error,
-      });
-      setNotes(result.notes);
-      setSuggested(result.query && result.query.trim() !== query.trim() ? result.query : null);
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setThinking(false);
-    }
-  };
-
-  return (
-    <div className="flex min-h-0 flex-1 gap-3 p-4">
-      {/* left: query + AI */}
-      <div className="flex w-[46%] min-w-[380px] flex-col gap-3">
-        <div className="flex flex-col rounded-lg border bg-card shadow-sm">
-          <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-            <span className="text-xs font-medium">Query</span>
-            <div className="flex-1" />
-            <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={running} onClick={() => void run()}>
-              {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              Run
-            </Button>
-          </div>
-          <CodeEditor value={query} onChange={setQuery} onRun={() => void run()} height="180px" />
-        </div>
-
-        {/* quick AI actions */}
-        <div className="flex flex-wrap gap-1.5">
-          {QUICK_PROMPTS.map((p) => (
-            <button
-              key={p.id}
-              disabled={thinking}
-              onClick={() => void ask(p.instruction)}
-              className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
-            >
-              <Cpu className="h-3 w-3 text-primary" />
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {/* AI output */}
-        <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card shadow-sm">
-          <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5">
-            <Cpu className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs font-medium">AI assistant</span>
-            {thinking && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {!notes && !thinking && (
-              <p className="text-xs text-muted-foreground">
-                Run your query, then pick an action above — fix errors, optimize, explain, or get
-                index suggestions. The last error (if any) is sent along automatically.
-              </p>
-            )}
-            {thinking && (
-              <p className="text-xs text-muted-foreground">Analyzing your query…</p>
-            )}
-            {notes && (
-              <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">{notes}</pre>
-            )}
-            {suggested && (
-              <div className="mt-3 rounded-md border border-primary/30 bg-primary/5 p-2.5">
-                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                  Suggested query
-                </p>
-                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
-                  {suggested}
-                </pre>
-                <div className="mt-2 flex gap-2">
-                  <Button
-                    size="sm"
-                    className="h-7 gap-1.5 text-xs"
-                    onClick={() => {
-                      setQuery(suggested);
-                      void run(suggested);
-                    }}
-                  >
-                    <Play className="h-3 w-3" />
-                    Apply & run
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => setQuery(suggested)}
-                  >
-                    Apply only
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* right: results */}
-      <div className="flex min-w-0 flex-1 flex-col rounded-lg border bg-card shadow-sm">
-        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          <span className="text-xs text-muted-foreground">
-            {outcome?.docs
-              ? `${outcome.docs.length} result${outcome.docs.length === 1 ? "" : "s"}`
-              : "Results"}
-            {outcome && ` · ${outcome.execMs}ms`}
-          </span>
-          <div className="flex-1" />
-          <ViewToggle view={view} onChange={setView} />
-        </div>
-        {error && (
-          <div className="mx-3 mt-2 shrink-0 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
-            {error}
-          </div>
-        )}
-        {outcome?.docs ? (
-          <ResultsViewer
-            docs={outcome.docs}
-            view={view}
-            actions={{ onView: (doc) => setDialog({ type: "view", doc }) }}
-            emptyText="No documents returned"
-          />
-        ) : outcome ? (
-          <pre className="flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
-            {outcome.message ?? JSON.stringify(outcome.value, null, 2)}
-          </pre>
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground">
-            <p className="no-select text-sm">Run a query to see results here</p>
-          </div>
-        )}
-      </div>
-
-      <DocumentDialogs
-        database={database}
-        collection={collection}
-        state={dialog}
-        onClose={() => setDialog({ type: "closed" })}
-        onMutated={() => void run()}
       />
     </div>
   );

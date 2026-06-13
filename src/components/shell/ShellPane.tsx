@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   AlertCircle,
   CheckCircle2,
+  Cpu,
   Database,
   History,
   Info,
   Loader2,
   Play,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,14 +28,79 @@ import { ValueTree } from "@/components/explorer/ValueTree";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
 import { useExplorer, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
-import type { Doc } from "@/lib/api";
+import { useStudio } from "@/stores/studio";
+import { api, errMsg, type Doc } from "@/lib/api";
+import { optimizeQuery, QUICK_PROMPTS } from "@/lib/ai";
+
+const FIX_INSTRUCTION =
+  QUICK_PROMPTS.find((p) => p.id === "fix")?.instruction ??
+  "Fix any syntax or semantic errors in this query so it runs correctly.";
 
 export function ShellPane({ tab }: { tab: Tab }) {
   const { patchShell, runShell } = useExplorer();
   const { shellHistory, clearShellHistory } = useSettings();
+  const apiKey = useStudio((s) => s.apiKey);
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
+
+  // ── AI optimizer state (developer-facing; lives here, not in Studio) ──
+  const [fields, setFields] = useState<string[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [notes, setNotes] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<string | null>(null);
+
   const s = tab.shell;
   const outcome = s.outcome;
+
+  // Schema fields sharpen the AI's index/optimization suggestions.
+  useEffect(() => {
+    setFields([]);
+    api
+      .collectionFields(tab.database, tab.collection, 1000)
+      .then(setFields)
+      .catch(() => {});
+  }, [tab.database, tab.collection]);
+
+  const ask = async (instruction: string) => {
+    if (!s.text.trim()) return;
+    if (!apiKey) {
+      toast.error("Add your OpenAI API key in Settings → Prompts & AI to use AI assist");
+      return;
+    }
+    setThinking(true);
+    setNotes(null);
+    setSuggested(null);
+    try {
+      const result = await optimizeQuery({
+        query: s.text,
+        instruction,
+        database: tab.database,
+        collection: tab.collection,
+        fields,
+        error: s.error,
+      });
+      setNotes(result.notes);
+      setSuggested(
+        result.query && result.query.trim() !== s.text.trim() ? result.query : null
+      );
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  const apply = (run: boolean) => {
+    if (!suggested) return;
+    patchShell(tab.id, { text: suggested });
+    setSuggested(null);
+    setNotes(null);
+    if (run) void runShell(tab.id);
+  };
+
+  const dismissAi = () => {
+    setNotes(null);
+    setSuggested(null);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -109,9 +178,89 @@ export function ShellPane({ tab }: { tab: Tab }) {
       {s.error && (
         <div className="mx-3 mb-2 flex shrink-0 items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="break-all font-mono">{s.error}</span>
+          <span className="min-w-0 flex-1 break-all font-mono">{s.error}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 shrink-0 gap-1 border-destructive/40 text-xs text-destructive hover:text-destructive"
+            disabled={thinking}
+            onClick={() => void ask(FIX_INSTRUCTION)}
+          >
+            {thinking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            Fix with AI
+          </Button>
         </div>
       )}
+
+      {/* quick AI actions — fix / optimize / explain / indexes on the spot */}
+      <div className="no-select flex shrink-0 flex-wrap items-center gap-1.5 px-3 pb-2">
+        <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+          <Cpu className="h-3 w-3 text-primary" />
+          AI assist
+        </span>
+        {QUICK_PROMPTS.map((p) => (
+          <button
+            key={p.id}
+            disabled={thinking || !s.text.trim()}
+            onClick={() => void ask(p.instruction)}
+            className="rounded-full border bg-card px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* AI output */}
+      {(thinking || notes) && (
+        <div className="mx-3 mb-2 flex max-h-[45%] shrink-0 flex-col overflow-hidden rounded-md border border-primary/25 bg-primary/5 text-xs">
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-primary/20 px-3 py-1.5">
+            <Cpu className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">AI assistant</span>
+            {thinking && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            <div className="flex-1" />
+            {!thinking && (
+              <button
+                onClick={dismissAi}
+                className="rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {thinking && <p className="text-muted-foreground">Analyzing your query…</p>}
+            {notes && (
+              <pre className="whitespace-pre-wrap font-sans leading-relaxed">{notes}</pre>
+            )}
+            {suggested && (
+              <div className="mt-3 rounded-md border border-primary/30 bg-card p-2.5">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  Suggested query
+                </p>
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
+                  {suggested}
+                </pre>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => apply(true)}>
+                    <Play className="h-3 w-3" />
+                    Apply &amp; run
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => apply(false)}
+                  >
+                    Apply only
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {outcome?.appliedDefaultLimit && !s.error && (
         <div className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-1.5 text-xs text-muted-foreground">
           <Info className="h-3.5 w-3.5 shrink-0 text-info" />

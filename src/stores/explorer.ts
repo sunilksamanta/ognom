@@ -134,6 +134,7 @@ interface ExplorerState {
   setSidebarFilter: (v: string) => void;
 
   openCollection: (database: string, collection: string) => void;
+  openShellWithQuery: (database: string, collection: string, query: string) => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   setTabMode: (id: string, mode: TabMode) => void;
@@ -225,6 +226,34 @@ export const useExplorer = create<ExplorerState>((set, get) => {
       };
       set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
       void get().runFind(id);
+    },
+
+    // Hand-off from Studio: open (or focus) a collection straight into Shell
+    // mode with the query pre-filled, ready to optimize.
+    openShellWithQuery: (database, collection, query) => {
+      const existing = get().tabs.find(
+        (t) => t.database === database && t.collection === collection
+      );
+      if (existing) {
+        patchTab(existing.id, (t) => ({
+          ...t,
+          mode: "shell",
+          shell: { ...t.shell, text: query, outcome: null, error: null },
+        }));
+        set({ activeTabId: existing.id });
+        return;
+      }
+      const id = newId("tab");
+      const tab: Tab = {
+        id,
+        database,
+        collection,
+        mode: "shell",
+        docs: freshDocs(useSettings.getState().pageSize),
+        agg: freshAgg(),
+        shell: { ...freshShell(collection), text: query },
+      };
+      set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
     },
 
     closeTab: (id) => {
