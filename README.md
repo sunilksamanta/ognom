@@ -144,44 +144,40 @@ Grab the build for your OS from the **[latest release ⬇️](https://github.com
 
 ### 🍎 macOS
 
-**1. Pick the right build.** Apple menu → **About This Mac**. If it says **Apple M1/M2/M3…**, download the **`aarch64`** `.dmg`; if it says **Intel**, download the **`x64`** `.dmg`.
+**1. Pick the right build.** Apple menu → **About This Mac**. If it says **Apple M1/M2/M3/M4…** (Apple Silicon), download the **`aarch64`** `.dmg`; if it says **Intel**, download the **`x64`** `.dmg`. *(Picked the wrong one? The Intel build also runs on Apple Silicon via Rosetta, but the native `aarch64` build is faster — prefer it.)*
 
 **2. Install.** Open the `.dmg` and drag **Ognom** into your **Applications** folder.
 
-**3. First launch — clear Gatekeeper.** Ognom is open source and distributed outside the App Store, so macOS will warn you the first time. **This is normal.** Pick whichever fits the message you see:
-
-> *"Ognom can't be opened because Apple cannot check it for malicious software."*
-
-<details>
-<summary><b>Option A — Right‑click to open (easiest)</b></summary>
-
-1. In **Finder**, open **Applications**.
-2. **Right‑click** (or Control‑click) **Ognom** → **Open**.
-3. Click **Open** in the dialog. macOS remembers your choice — you only do this once.
-</details>
-
-<details>
-<summary><b>Option B — Allow it from System Settings</b></summary>
-
-1. Try to open Ognom once (let the warning appear, then dismiss it).
-2. Open **Apple menu → System Settings → Privacy & Security**.
-3. **Scroll to the bottom** to the **Security** section — you'll see *"Ognom was blocked from use…"*.
-4. Click **Open Anyway**, then confirm with **Open** / Touch ID.
-</details>
-
-<details>
-<summary><b>Option C — If it says "damaged" (clears the quarantine flag)</b></summary>
-
-Newer macOS sometimes blocks downloaded apps with a *"damaged"* message. Remove the quarantine attribute in Terminal:
+**3. First launch — clear Gatekeeper (one command).** Ognom is open source and distributed outside the App Store, so macOS quarantines it on download. The one step that works on **every Mac** — and is **required on Apple Silicon** — is to remove that quarantine flag. Open **Terminal** and run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Ognom.app
 ```
 
-Then open Ognom normally. ✅
+Then double‑click **Ognom** in Applications. That's it — you only do this once. ✅
+
+<details>
+<summary><b>Why is this needed? (and why right‑click → Open isn't enough on Apple Silicon)</b></summary>
+
+macOS adds a `com.apple.quarantine` flag to anything you download. Because Ognom isn't signed with a paid Apple Developer certificate, Gatekeeper blocks the quarantined app — but the message differs by chip:
+
+- **Apple Silicon (M‑series):** macOS shows *"Ognom is damaged and can't be opened."* There is **no** right‑click → Open or "Open Anyway" escape for the *damaged* verdict — Apple Silicon strictly enforces code signatures, so the quarantine flag **must** be removed with the command above.
+- **Intel:** macOS shows the gentler *"unidentified developer"* warning, which right‑click → Open *can* bypass.
+
+The `xattr` command simply strips the download flag so macOS treats the app like one you built yourself. Notarized apps from a paid Developer account skip all of this — Ognom is free and open source, and the code is right here for you to read or build yourself.
 </details>
 
-> Why? Notarized apps from a paid Apple Developer account skip these prompts. Ognom is free and open source — the code is right here for you to read and build yourself.
+<details>
+<summary><b>Intel Mac alternative — right‑click → Open (no Terminal)</b></summary>
+
+On an **Intel** Mac you can skip the command:
+
+1. In **Finder**, open **Applications**.
+2. **Right‑click** (or Control‑click) **Ognom** → **Open**.
+3. Click **Open** in the dialog. macOS remembers your choice.
+
+If you instead see a *"damaged"* message (typical on Apple Silicon), use the `xattr` command above — right‑click → Open won't clear it.
+</details>
 
 ### 🪟 Windows
 
