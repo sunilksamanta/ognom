@@ -27,6 +27,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
+  const hosts = (active?.hostSummary ?? "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+  // First host without the :port — replica-set members share a domain, so the
+  // first one reads as the cluster; extra members collapse into a "+N" badge.
+  const primaryHost = hosts[0]?.replace(/:\d+$/, "") ?? "";
+
   return (
     <header
       onMouseDown={dragWindow}
@@ -38,21 +46,50 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <OgnomMark className="h-5 w-5 shrink-0" />
 
       {/* connection pill */}
-      <button
-        onClick={() => setManagerOpen(true)}
-        className="group flex min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-1 transition-colors hover:border-border hover:bg-accent"
-        title="Manage connections"
-      >
-        <span className="relative flex h-2 w-2 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-        </span>
-        <span className="truncate text-sm font-medium">{active?.name}</span>
-        <span className="hidden truncate font-mono text-xs text-muted-foreground md:inline">
-          {active?.hostSummary}
-        </span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => setManagerOpen(true)}
+            className="group flex min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-1 transition-colors hover:border-border hover:bg-accent"
+          >
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+            </span>
+            <span className="max-w-[180px] truncate text-sm font-medium">{active?.name}</span>
+            {primaryHost && (
+              <span className="hidden max-w-[200px] items-center gap-1.5 md:flex">
+                <span className="h-3 w-px bg-border" />
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {primaryHost}
+                </span>
+                {hosts.length > 1 && (
+                  <span className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground">
+                    +{hosts.length - 1}
+                  </span>
+                )}
+              </span>
+            )}
+            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-none">
+          {hosts.length > 0 ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-foreground/60">
+                {hosts.length === 1 ? "Host" : `${hosts.length} hosts`} · click to manage
+              </span>
+              <div className="flex flex-col gap-0.5 font-mono text-[11px]">
+                {hosts.map((h) => (
+                  <span key={h}>{h}</span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            "Manage connections"
+          )}
+        </TooltipContent>
+      </Tooltip>
 
       <div className="flex-1" />
 

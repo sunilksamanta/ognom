@@ -78,7 +78,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[20%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[520px]">
+      <DialogContent hideClose align="start" className="gap-0 overflow-hidden p-0 sm:max-w-[520px]">
         <DialogTitle className="sr-only">Go to collection</DialogTitle>
         <div className="flex items-center gap-2 border-b px-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />

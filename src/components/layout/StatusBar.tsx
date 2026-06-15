@@ -16,6 +16,11 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
     getVersion().then(setVersion).catch(() => setVersion(""));
   }, []);
 
+  const hosts = (active?.hostSummary ?? "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+
   let stats: string | null = null;
   if (tab) {
     if (tab.mode === "documents" && tab.docs.execMs !== null) {
@@ -29,13 +34,34 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
   }
 
   return (
-    <footer className="no-select flex h-6 shrink-0 items-center gap-3 border-t bg-card px-3 text-[11px] text-muted-foreground">
-      <span className="flex items-center gap-1.5">
+    <footer className="no-select flex h-6 shrink-0 items-center gap-3 overflow-hidden whitespace-nowrap border-t bg-card px-3 text-[11px] text-muted-foreground">
+      <span className="flex shrink-0 items-center gap-1.5">
         <Server className="h-3 w-3 text-primary" />
         MongoDB {active?.serverVersion}
       </span>
-      <span>{active?.topology}</span>
-      <span className="hidden font-mono lg:inline">{active?.hostSummary}</span>
+      {active?.topology && (
+        hosts.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex shrink-0 cursor-default items-center gap-1.5">
+                {active.topology}
+                <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] text-foreground/70">
+                  {hosts.length} {hosts.length === 1 ? "node" : "nodes"}
+                </span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-none">
+              <div className="flex flex-col gap-0.5 font-mono text-[11px]">
+                {hosts.map((h) => (
+                  <span key={h}>{h}</span>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="shrink-0">{active.topology}</span>
+        )
+      )}
 
       {security?.degraded && (
         <Tooltip>
@@ -53,12 +79,12 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
       )}
 
       <div className="flex-1" />
-      {stats && <span className="tabular-nums">{stats}</span>}
+      {stats && <span className="shrink-0 tabular-nums">{stats}</span>}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             onClick={onAbout}
-            className="font-medium text-primary/90 transition-colors hover:text-primary"
+            className="shrink-0 font-medium text-primary/90 transition-colors hover:text-primary"
           >
             Ognom{version ? ` ${version}` : ""}
           </button>
