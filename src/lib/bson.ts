@@ -218,6 +218,78 @@ export function toShellText(v: unknown, indent = 0): string {
   return `{\n${entries.map((s) => padIn + s).join(",\n")}\n${pad}}`;
 }
 
+// ---------------------------------------------------------------------------
+// plain JSON (every BSON wrapper collapsed — no $oid / $date / $numberLong / …)
+// ---------------------------------------------------------------------------
+
+/** Collapse a relaxed-extJSON value into a pure JS value with no `$`-wrappers. */
+export function toPlainValue(v: unknown): unknown {
+  switch (kindOf(v)) {
+    case "null":
+      return null;
+    case "string":
+    case "number":
+    case "boolean":
+      return v;
+    case "array":
+      return (v as unknown[]).map(toPlainValue);
+    case "objectId":
+      return (v as Obj).$oid as string;
+    case "date": {
+      const d = dateOf(v);
+      return d ? d.toISOString() : isoOf(v);
+    }
+    case "long": {
+      // longs can exceed 2^53 (snowflake ids); keep as string when unsafe.
+      const s = (v as Obj).$numberLong as string;
+      const n = Number(s);
+      return Number.isSafeInteger(n) ? n : s;
+    }
+    case "double": {
+      const n = Number((v as Obj).$numberDouble as string);
+      return Number.isFinite(n) ? n : null; // NaN / ±Infinity → null (JSON has no literal)
+    }
+    case "decimal": {
+      const s = (v as Obj).$numberDecimal as string;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : s;
+    }
+    case "uuid": {
+      const o = v as Obj;
+      return typeof o.$uuid === "string"
+        ? o.$uuid
+        : ((o.$binary as Obj)?.base64 as string) ?? null;
+    }
+    case "binary":
+      return (((v as Obj).$binary as Obj)?.base64 as string) ?? null;
+    case "regex": {
+      const r = (v as Obj).$regularExpression as Obj;
+      return `/${r?.pattern ?? ""}/${r?.options ?? ""}`;
+    }
+    case "timestamp": {
+      const t = (v as Obj).$timestamp as Obj;
+      return { t: Number(t?.t ?? 0), i: Number(t?.i ?? 0) };
+    }
+    case "code":
+      return (v as Obj).$code as string;
+    case "minKey":
+      return "MinKey";
+    case "maxKey":
+      return "MaxKey";
+    case "object": {
+      const o = v as Obj;
+      const out: Obj = {};
+      for (const k of Object.keys(o)) out[k] = toPlainValue(o[k]);
+      return out;
+    }
+  }
+}
+
+/** A value as pure JSON text — every BSON wrapper collapsed to a plain value. */
+export function toPlainJson(v: unknown): string {
+  return JSON.stringify(toPlainValue(v), null, 2);
+}
+
 /** The raw extJSON _id of a document (pass straight back to the backend). */
 export function docId(doc: Obj): unknown {
   return doc._id;

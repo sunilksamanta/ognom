@@ -7,9 +7,24 @@ export type AiMode = "normal" | "deep";
 /** The single OpenAI model Studio uses (reasoning is toggled per mode). */
 export const DEFAULT_MODEL = "gpt-5.4-nano";
 
-export const AI_MODE_META: Record<AiMode, { label: string; reasoning: boolean; hint: string }> = {
-  normal: { label: "Normal mode", reasoning: false, hint: "fast · minimal reasoning" },
-  deep: { label: "Deep Think mode", reasoning: true, hint: "reasoning enabled" },
+export const AI_MODE_META: Record<
+  AiMode,
+  { label: string; short: string; reasoning: boolean; hint: string; desc: string }
+> = {
+  normal: {
+    label: "Normal mode",
+    short: "Normal",
+    reasoning: false,
+    hint: "fast · minimal reasoning",
+    desc: "Fast answers with minimal reasoning. Best for quick lookups, simple counts, and straightforward queries.",
+  },
+  deep: {
+    label: "Deep Think mode",
+    short: "Deep Think",
+    reasoning: true,
+    hint: "reasoning enabled",
+    desc: "Reasons step-by-step before answering — slower, but better at complex joins, multi-stage aggregations, and ambiguous questions.",
+  },
 };
 
 interface StudioState {

@@ -1,10 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Feather, Heart, Lock, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  ExternalLink,
+  Feather,
+  Github,
+  Heart,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  Star,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { OgnomMark } from "@/components/WelcomeScreen";
 import { checkForUpdates } from "@/lib/updater";
+import { openExternal, REPO_URL, REPO_LABEL } from "@/lib/links";
 
 interface AboutDialogProps {
   open: boolean;
@@ -66,13 +76,40 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
           <Prop icon={ShieldCheck} label="Encrypted at rest" />
         </div>
 
+        {/* star ask */}
+        <div className="mx-6 mt-4 rounded-xl border border-primary/25 bg-primary/[0.06] p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <Star className="h-4 w-4 fill-current" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-foreground">Enjoying Ognom?</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                It’s free and open source. A star on GitHub helps more people find it — and means a
+                lot to a solo developer.
+              </p>
+            </div>
+          </div>
+          <Button className="mt-3 w-full gap-2" onClick={() => void openExternal(REPO_URL)}>
+            <Github className="h-4 w-4" />
+            Star on GitHub
+            <Star className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        </div>
+
         {/* footer */}
         <div className="mt-6 flex items-center justify-between gap-3 border-t bg-card/40 px-6 py-3">
-          <span className="font-mono text-[11px] leading-tight text-muted-foreground">
-            MIT licensed
-            <br />
-            github.com/sunilksamanta/ognom
-          </span>
+          <button
+            type="button"
+            onClick={() => void openExternal(REPO_URL)}
+            className="group flex flex-col items-start text-left font-mono text-[11px] leading-tight text-muted-foreground transition-colors hover:text-primary"
+          >
+            <span>MIT licensed</span>
+            <span className="inline-flex items-center gap-1 group-hover:underline">
+              {REPO_LABEL}
+              <ExternalLink className="h-3 w-3" />
+            </span>
+          </button>
           <Button
             variant="outline"
             size="sm"

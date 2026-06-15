@@ -18,6 +18,7 @@ pub fn run() {
             }
             {
                 app.handle().plugin(tauri_plugin_dialog::init())?;
+                app.handle().plugin(tauri_plugin_opener::init())?;
             }
 
             // macOS: add "About Ognom" and "Check for Updates…" to the
@@ -86,6 +87,7 @@ pub fn run() {
             commands::connect,
             commands::connect_input,
             commands::disconnect,
+            commands::server_info,
             commands::list_databases,
             commands::list_collections,
             commands::find_documents,

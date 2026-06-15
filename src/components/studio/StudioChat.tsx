@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   AlignLeft,
   BarChart3,
+  BrainCircuit,
   ChartLine,
   ChartPie,
   Code2,
@@ -23,6 +24,7 @@ import {
   Table2,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +40,7 @@ import {
   type ChartType,
 } from "@/components/studio/CanvasChart";
 import { useExplorer } from "@/stores/explorer";
-import { useStudio } from "@/stores/studio";
+import { useStudio, AI_MODE_META, type AiMode } from "@/stores/studio";
 import { useChat, WHOLE_DB, type ChatSession, type ChatTurn } from "@/stores/chat";
 import { api, errMsg, type Doc } from "@/lib/api";
 import {
@@ -750,6 +752,9 @@ function Composer({
   onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
+  // narrow selectors → toggling the mode re-renders only this composer
+  const aiMode = useStudio((s) => s.aiMode);
+  const setAiMode = useStudio((s) => s.setAiMode);
   const submit = () => {
     const t = text.trim();
     if (!t || busy) return;
@@ -810,6 +815,40 @@ function Composer({
             )}
             Send
           </Button>
+        </div>
+        {/* AI mode — sits under the input; hover a mode for what it's best at */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-medium text-muted-foreground">Mode</span>
+          <div className="flex items-center rounded-full border bg-muted/60 p-0.5">
+            {(Object.keys(AI_MODE_META) as AiMode[]).map((m) => (
+              <Tooltip key={m}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setAiMode(m)}
+                    aria-pressed={aiMode === m}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      aiMode === m
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {m === "normal" ? (
+                      <Zap className="h-3 w-3" />
+                    ) : (
+                      <BrainCircuit className="h-3 w-3" />
+                    )}
+                    {AI_MODE_META[m].short}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[240px]">
+                  <p className="font-semibold">{AI_MODE_META[m].label}</p>
+                  <p className="mt-0.5 text-muted-foreground">{AI_MODE_META[m].desc}</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
         </div>
       </div>
     </div>

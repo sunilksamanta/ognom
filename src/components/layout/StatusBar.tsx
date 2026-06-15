@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { KeyRound, Server } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ServerInfoDialog } from "@/components/ServerInfoDialog";
 import { useConnections } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { formatCount } from "@/lib/bson";
@@ -11,6 +12,7 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
   const { tabs, activeTabId } = useExplorer();
   const tab = tabs.find((t) => t.id === activeTabId);
   const [version, setVersion] = useState("");
+  const [infoOpen, setInfoOpen] = useState(false);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
@@ -34,11 +36,27 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
   }
 
   return (
+    <>
     <footer className="no-select flex h-6 shrink-0 items-center gap-3 overflow-hidden whitespace-nowrap border-t bg-card px-3 text-[11px] text-muted-foreground">
-      <span className="flex shrink-0 items-center gap-1.5">
-        <Server className="h-3 w-3 text-primary" />
-        MongoDB {active?.serverVersion}
-      </span>
+      {active ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setInfoOpen(true)}
+              className="flex shrink-0 items-center gap-1.5 rounded-sm transition-colors hover:text-foreground"
+            >
+              <Server className="h-3 w-3 text-primary" />
+              MongoDB {active.serverVersion}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Server details</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Server className="h-3 w-3 text-primary" />
+          MongoDB
+        </span>
+      )}
       {active?.topology && (
         hosts.length > 0 ? (
           <Tooltip>
@@ -92,5 +110,7 @@ export function StatusBar({ onAbout }: { onAbout?: () => void }) {
         <TooltipContent>About Ognom</TooltipContent>
       </Tooltip>
     </footer>
+    <ServerInfoDialog open={infoOpen} onOpenChange={setInfoOpen} />
+    </>
   );
 }

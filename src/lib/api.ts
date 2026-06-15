@@ -77,6 +77,19 @@ export interface TestResult {
   error?: string | null;
 }
 
+/**
+ * Raw admin-command output for the server-details dialog. Each section is the
+ * relaxed-extJSON result of one command, or `null` when the deployment forbids
+ * it (Atlas restricts hostInfo / serverStatus on some tiers).
+ */
+export interface ServerInfoRaw {
+  buildInfo: Doc | null;
+  hello: Doc | null;
+  serverStatus: Doc | null;
+  hostInfo: Doc | null;
+  connectionStatus: Doc | null;
+}
+
 export interface SecurityInfo {
   secretBackend: "keychain" | "file";
   /** Keychain was requested but unavailable; key file is in use. */
@@ -199,6 +212,7 @@ export const api = {
   connect: (profileId: string) => invoke<ConnectionInfo>("connect", { profileId }),
   connectInput: (input: ProfileInput) => invoke<ConnectionInfo>("connect_input", { input }),
   disconnect: () => invoke<void>("disconnect"),
+  serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 
   // metadata
   listDatabases: () => invoke<DbInfo[]>("list_databases"),

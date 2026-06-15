@@ -1,15 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  BrainCircuit,
-  Check,
-  Cpu,
-  Database,
-  History,
-  KeyRound,
-  Layers,
-  Zap,
-} from "lucide-react";
+import { Check, Cpu, Database, History, KeyRound, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { StudioChat, RecentChats } from "@/components/studio/StudioChat";
 import { useExplorer } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
-import { useStudio, AI_MODE_META, DEFAULT_MODEL, type AiMode } from "@/stores/studio";
+import { useStudio, DEFAULT_MODEL } from "@/stores/studio";
 import { useChat, WHOLE_DB, type ChatSession } from "@/stores/chat";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -34,7 +25,7 @@ import { cn } from "@/lib/utils";
 export function StudioPane() {
   const { databases, collections, loadDatabases, loadCollections, openShellWithQuery } =
     useExplorer();
-  const { apiKey, setApiKey, aiMode, setAiMode, model, setTerminator } = useStudio();
+  const { apiKey, setApiKey, setTerminator } = useStudio();
   const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
   const sessions = useChat((s) => s.sessions);
   const setActiveChat = useChat((s) => s.setActive);
@@ -93,7 +84,7 @@ export function StudioPane() {
         <div className="mx-1 h-5 w-px bg-border" />
 
         <Database className="h-3.5 w-3.5 text-muted-foreground" />
-        <Select value={database} onValueChange={(v) => { setDatabase(v); setScope(""); }}>
+        <Select value={database} onValueChange={(v) => { setDatabase(v); setScope(WHOLE_DB); }}>
           <SelectTrigger className="h-7 w-[160px] text-xs">
             <SelectValue placeholder="Database" />
           </SelectTrigger>
@@ -126,35 +117,6 @@ export function StudioPane() {
         </Select>
 
         <div className="flex-1" />
-
-        {/* AI mode */}
-        <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
-          {(Object.keys(AI_MODE_META) as AiMode[]).map((m) => (
-            <Tooltip key={m}>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => setAiMode(m)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
-                    aiMode === m
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {m === "normal" ? (
-                    <Zap className="h-3.5 w-3.5" />
-                  ) : (
-                    <BrainCircuit className="h-3.5 w-3.5" />
-                  )}
-                  {AI_MODE_META[m].label}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {model} · {AI_MODE_META[m].hint}
-              </TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
 
         <ApiKeyPopover apiKey={apiKey} setApiKey={setApiKey} />
       </div>

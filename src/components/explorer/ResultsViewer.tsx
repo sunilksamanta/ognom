@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ValueTree } from "@/components/explorer/ValueTree";
-import { idLabel, kindOf, leafText, toShellText, type BsonKind } from "@/lib/bson";
+import { idLabel, kindOf, leafText, toPlainJson, toShellText, type BsonKind } from "@/lib/bson";
 import type { Doc } from "@/lib/api";
 import type { ViewMode } from "@/stores/explorer";
 import { cn } from "@/lib/utils";
@@ -44,12 +44,10 @@ function CopyMenu({ doc }: { doc: Doc }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={() => void copyText(toShellText(doc), "Document")}>
-          Copy as shell
+          Copy Document
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => void copyText(JSON.stringify(doc, null, 2), "Document")}
-        >
-          Copy as Extended JSON
+        <DropdownMenuItem onClick={() => void copyText(toPlainJson(doc), "Document")}>
+          Copy Document as JSON
         </DropdownMenuItem>
         {"_id" in doc && (
           <DropdownMenuItem onClick={() => void copyText(toShellText(doc._id), "_id")}>
@@ -152,11 +150,11 @@ function DocContextMenu({
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void copyText(toShellText(doc), "Document")}>
           <Copy />
-          Copy as shell
+          Copy Document
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void copyText(JSON.stringify(doc, null, 2), "Document")}>
+        <ContextMenuItem onSelect={() => void copyText(toPlainJson(doc), "Document")}>
           <Copy />
-          Copy as Extended JSON
+          Copy Document as JSON
         </ContextMenuItem>
         {"_id" in doc && (
           <ContextMenuItem onSelect={() => void copyText(toShellText(doc._id), "_id")}>

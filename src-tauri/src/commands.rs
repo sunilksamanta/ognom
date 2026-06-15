@@ -283,6 +283,28 @@ pub async fn disconnect(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
+/// Detailed server diagnostics for the status-bar info dialog. Each admin
+/// command degrades independently — Atlas and other locked-down deployments
+/// forbid some of these (hostInfo, serverStatus), so those sections come back
+/// `null` and the UI simply hides them.
+#[tauri::command]
+pub async fn server_info(state: State<'_, AppState>) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let admin = client.database("admin");
+
+    async fn cmd(db: &mongodb::Database, command: Document) -> Option<Value> {
+        db.run_command(command).await.ok().map(doc_to_value)
+    }
+
+    Ok(json!({
+        "buildInfo": cmd(&admin, doc! {"buildInfo": 1}).await,
+        "hello": cmd(&admin, doc! {"hello": 1}).await,
+        "serverStatus": cmd(&admin, doc! {"serverStatus": 1}).await,
+        "hostInfo": cmd(&admin, doc! {"hostInfo": 1}).await,
+        "connectionStatus": cmd(&admin, doc! {"connectionStatus": 1, "showPrivileges": false}).await,
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // metadata
 // ---------------------------------------------------------------------------

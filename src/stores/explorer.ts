@@ -83,7 +83,8 @@ export const newStage = (op = "$match", body = "{\n  \n}"): Stage => ({
 
 const freshDocs = (limit: number): DocsState => ({
   filter: "",
-  sort: "",
+  // Newest-first by default (ObjectId _ids embed creation time); user can edit.
+  sort: "{ _id: -1 }",
   projection: "",
   limit,
   page: 0,
