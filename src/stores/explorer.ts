@@ -118,6 +118,17 @@ const freshShell = (collection: string): ShellState => ({
   view: "json",
 });
 
+/** The per-workspace slice of explorer state — cached when switching away from
+ *  a workspace and restored when switching back. */
+export interface ExplorerSnapshot {
+  databases: DbInfo[];
+  collections: Record<string, CollInfo[]>;
+  expanded: Record<string, boolean>;
+  sidebarFilter: string;
+  tabs: Tab[];
+  activeTabId: string | null;
+}
+
 interface ExplorerState {
   databases: DbInfo[];
   loadingDbs: boolean;
@@ -129,6 +140,10 @@ interface ExplorerState {
   activeTabId: string | null;
 
   reset: () => void;
+  /** Capture the current workspace's slice for caching. */
+  snapshot: () => ExplorerSnapshot;
+  /** Replace state with a cached slice, or reset to empty when `null`. */
+  hydrate: (snap: ExplorerSnapshot | null) => void;
   loadDatabases: () => Promise<void>;
   toggleDatabase: (name: string) => Promise<void>;
   loadCollections: (db: string) => Promise<CollInfo[]>;
@@ -168,12 +183,41 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     reset: () =>
       set({
         databases: [],
+        loadingDbs: false,
         collections: {},
         expanded: {},
         sidebarFilter: "",
         tabs: [],
         activeTabId: null,
       }),
+
+    snapshot: () => {
+      const s = get();
+      return {
+        databases: s.databases,
+        collections: s.collections,
+        expanded: s.expanded,
+        sidebarFilter: s.sidebarFilter,
+        tabs: s.tabs,
+        activeTabId: s.activeTabId,
+      };
+    },
+
+    hydrate: (snap) => {
+      if (!snap) {
+        get().reset();
+        return;
+      }
+      set({
+        databases: snap.databases,
+        loadingDbs: false,
+        collections: snap.collections,
+        expanded: snap.expanded,
+        sidebarFilter: snap.sidebarFilter,
+        tabs: snap.tabs,
+        activeTabId: snap.activeTabId,
+      });
+    },
 
     loadDatabases: async () => {
       set({ loadingDbs: true });

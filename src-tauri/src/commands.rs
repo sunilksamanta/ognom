@@ -12,14 +12,33 @@ use crate::error::{AppError, AppResult};
 use crate::profiles::{uri_from_input, ProfileInput, ProfileStore, ProfileSummary};
 use crate::shell::{self, Statement};
 
+/// One live connection: the pooled driver client plus the metadata the UI
+/// shows for it. Keyed in [`Sessions::pool`] by workspace id (the profile id
+/// for saved connections, a generated `adhoc-N` for unsaved ones).
+pub struct PooledConn {
+    pub client: Client,
+    pub info: ConnectionInfo,
+}
+
+/// All connections the user has open at once. Switching workspaces just
+/// re-points `active` — the clients stay alive, so the pool stays warm and the
+/// switch is instant (no reconnect).
+#[derive(Default)]
+pub struct Sessions {
+    pub pool: std::collections::HashMap<String, PooledConn>,
+    pub active: Option<String>,
+}
+
 pub struct AppState {
-    pub conn: tokio::sync::Mutex<Option<Client>>,
+    pub sessions: tokio::sync::Mutex<Sessions>,
     pub store: std::sync::Mutex<ProfileStore>,
     pub crypto: std::sync::Mutex<Crypto>,
     pub data_dir: std::path::PathBuf,
     /// True when the user chose the keychain but it failed and the key file
     /// is being used instead.
     pub degraded: std::sync::atomic::AtomicBool,
+    /// Monotonic id source for unsaved ("ad-hoc") connections.
+    pub adhoc_seq: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -63,8 +82,12 @@ fn parse_doc_text(text: &str) -> AppResult<Document> {
 }
 
 async fn current_client(state: &State<'_, AppState>) -> AppResult<Client> {
-    let guard = state.conn.lock().await;
-    guard.clone().ok_or(AppError::NotConnected)
+    let s = state.sessions.lock().await;
+    let id = s.active.as_ref().ok_or(AppError::NotConnected)?;
+    s.pool
+        .get(id)
+        .map(|c| c.client.clone())
+        .ok_or(AppError::NotConnected)
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +97,9 @@ async fn current_client(state: &State<'_, AppState>) -> AppResult<Client> {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
+    /// Workspace id — the pool key. Profile id for saved connections, a
+    /// generated `adhoc-N` for unsaved ones.
+    pub id: String,
     pub profile_id: Option<String>,
     pub name: String,
     pub host_summary: String,
@@ -156,7 +182,16 @@ async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppRe
         .and_then(|d| d.get_str("version").map(str::to_string).ok())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let info = ConnectionInfo { profile_id, name, host_summary, server_version, topology, latency_ms };
+    // `id` is assigned by the caller once the pool key is known.
+    let info = ConnectionInfo {
+        id: String::new(),
+        profile_id,
+        name,
+        host_summary,
+        server_version,
+        topology,
+        latency_ms,
+    };
     Ok((client, info))
 }
 
@@ -258,8 +293,14 @@ pub async fn connect(profile_id: String, state: State<'_, AppState>) -> AppResul
         let profile = store.get(&profile_id)?;
         (store.uri_for(&profile_id, &crypto)?, profile.name.clone())
     };
-    let (client, info) = establish(&uri, name, Some(profile_id.clone())).await?;
-    *state.conn.lock().await = Some(client);
+    let (client, mut info) = establish(&uri, name, Some(profile_id.clone())).await?;
+    info.id = profile_id.clone();
+    {
+        let mut s = state.sessions.lock().await;
+        s.pool
+            .insert(profile_id.clone(), PooledConn { client, info: info.clone() });
+        s.active = Some(profile_id.clone());
+    }
     state.store.lock().unwrap().touch(&profile_id)?;
     Ok(info)
 }
@@ -271,15 +312,51 @@ pub async fn connect_input(
 ) -> AppResult<ConnectionInfo> {
     let uri = uri_from_input(&input)?;
     let name = if input.name.trim().is_empty() { "Unsaved connection".into() } else { input.name.clone() };
-    let (client, info) = establish(&uri, name, None).await?;
-    *state.conn.lock().await = Some(client);
+    let id = format!(
+        "adhoc-{}",
+        state.adhoc_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let (client, mut info) = establish(&uri, name, None).await?;
+    info.id = id.clone();
+    {
+        let mut s = state.sessions.lock().await;
+        s.pool.insert(id.clone(), PooledConn { client, info: info.clone() });
+        s.active = Some(id);
+    }
     Ok(info)
 }
 
+/// Make an already-open workspace the active one. Instant — the client is
+/// already alive in the pool, so this only re-points `active`.
+#[tauri::command]
+pub async fn switch_workspace(id: String, state: State<'_, AppState>) -> AppResult<ConnectionInfo> {
+    let mut s = state.sessions.lock().await;
+    let info = s
+        .pool
+        .get(&id)
+        .map(|c| c.info.clone())
+        .ok_or(AppError::NotConnected)?;
+    s.active = Some(id);
+    Ok(info)
+}
+
+/// Close one workspace. Dropping its `Client` clone tears down just that pool;
+/// the others stay connected. If it was active, `active` is cleared and the
+/// frontend picks the next workspace to switch to.
+#[tauri::command]
+pub async fn disconnect_workspace(id: String, state: State<'_, AppState>) -> AppResult<()> {
+    let mut s = state.sessions.lock().await;
+    s.pool.remove(&id);
+    if s.active.as_deref() == Some(id.as_str()) {
+        s.active = None;
+    }
+    Ok(())
+}
+
+/// Close every workspace (full teardown).
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> AppResult<()> {
-    // Dropping the last Client clone tears the pool down.
-    *state.conn.lock().await = None;
+    *state.sessions.lock().await = Sessions::default();
     Ok(())
 }
 

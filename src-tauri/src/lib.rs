@@ -62,11 +62,12 @@ pub fn run() {
             let store = profiles::ProfileStore::load(&data_dir)
                 .map_err(|e| format!("could not load connections: {e}"))?;
             app.manage(AppState {
-                conn: tokio::sync::Mutex::new(None),
+                sessions: tokio::sync::Mutex::new(commands::Sessions::default()),
                 store: std::sync::Mutex::new(store),
                 crypto: std::sync::Mutex::new(crypto),
                 data_dir,
                 degraded: std::sync::atomic::AtomicBool::new(degraded),
+                adhoc_seq: std::sync::atomic::AtomicU64::new(0),
             });
             Ok(())
         })
@@ -86,6 +87,8 @@ pub fn run() {
             commands::test_connection,
             commands::connect,
             commands::connect_input,
+            commands::switch_workspace,
+            commands::disconnect_workspace,
             commands::disconnect,
             commands::server_info,
             commands::list_databases,

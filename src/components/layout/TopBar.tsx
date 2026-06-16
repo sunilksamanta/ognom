@@ -1,39 +1,36 @@
 import { useState } from "react";
-import { ChevronDown, CircleHelp, Cpu, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
+import { CircleHelp, Cpu, PanelsTopLeft, PlugZap, Search, Settings2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { HelpDialog } from "@/components/HelpDialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OgnomMark } from "@/components/WelcomeScreen";
+import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
 import { ConnectionManager } from "@/components/connections/ConnectionManager";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useConnections } from "@/stores/connections";
-import { useExplorer } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
-import { useStudio } from "@/stores/studio";
 import { dragWindow } from "@/lib/window";
 import { cn } from "@/lib/utils";
 
 const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
 
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
-  const { active, disconnect } = useConnections();
-  const resetExplorer = useExplorer((s) => s.reset);
+  const active = useConnections((s) => s.active);
+  const activeId = useConnections((s) => s.activeId);
+  const disconnectWorkspace = useConnections((s) => s.disconnectWorkspace);
   const advancedMode = useSettings((s) => s.advancedMode);
-  const { terminator, setTerminator } = useStudio();
+  // Terminator (Ognom Studio) mode is remembered per workspace.
+  const terminator = useConnections((s) => {
+    const ws = s.workspaces.find((w) => w.info.id === s.activeId);
+    return ws?.terminator ?? false;
+  });
+  const setTerminator = useConnections((s) => s.setTerminator);
   const [managerOpen, setManagerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-
-  const hosts = (active?.hostSummary ?? "")
-    .split(",")
-    .map((h) => h.trim())
-    .filter(Boolean);
-  // First host without the :port — replica-set members share a domain, so the
-  // first one reads as the cluster; extra members collapse into a "+N" badge.
-  const primaryHost = hosts[0]?.replace(/:\d+$/, "") ?? "";
 
   return (
     <header
@@ -45,54 +42,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     >
       <OgnomMark className="h-5 w-5 shrink-0" />
 
-      {/* connection pill */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={() => setManagerOpen(true)}
-            className="group flex min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-1 transition-colors hover:border-border hover:bg-accent"
-          >
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-            </span>
-            <span className="max-w-[180px] truncate text-sm font-medium">{active?.name}</span>
-            {primaryHost && (
-              <span className="hidden max-w-[200px] items-center gap-1.5 md:flex">
-                <span className="h-3 w-px bg-border" />
-                <span className="truncate font-mono text-xs text-muted-foreground">
-                  {primaryHost}
-                </span>
-                {hosts.length > 1 && (
-                  <span className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground">
-                    +{hosts.length - 1}
-                  </span>
-                )}
-              </span>
-            )}
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-none">
-          {hosts.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-foreground/60">
-                {hosts.length === 1 ? "Host" : `${hosts.length} hosts`} · click to manage
-              </span>
-              <div className="flex flex-col gap-0.5 font-mono text-[11px]">
-                {hosts.map((h) => (
-                  <span key={h}>{h}</span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            "Manage connections"
-          )}
-        </TooltipContent>
-      </Tooltip>
+      {/* workspace switcher — name-only active pill, quick-switch pills, overflow */}
+      <WorkspaceBar onManage={() => setManagerOpen(true)} />
 
-      <div className="flex-1" />
-
+      {/* right-side controls stay put; the workspace bar takes the slack */}
+      <div className="flex shrink-0 items-center gap-2">
       {/* mode switch — classic workspace vs Terminator mode (Ognom Studio) */}
       <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
         {(
@@ -182,8 +136,9 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             <PlugZap className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Disconnect</TooltipContent>
+        <TooltipContent>Disconnect this workspace</TooltipContent>
       </Tooltip>
+      </div>
 
       <ConnectionManager open={managerOpen} onOpenChange={setManagerOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
@@ -191,12 +146,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <ConfirmDialog
         open={confirmDisconnect}
         onOpenChange={setConfirmDisconnect}
-        title="Disconnect?"
-        description={`Close the connection to ${active?.name ?? "the server"} and all open tabs.`}
+        title="Disconnect this workspace?"
+        description={`Close the connection to ${active?.name ?? "the server"} and its open tabs. Other workspaces stay connected.`}
         confirmLabel="Disconnect"
         onConfirm={async () => {
-          await disconnect();
-          resetExplorer();
+          if (activeId) await disconnectWorkspace(activeId);
           setConfirmDisconnect(false);
         }}
       />

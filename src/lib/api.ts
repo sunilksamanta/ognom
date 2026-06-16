@@ -61,6 +61,8 @@ export interface ProfileSummary {
 }
 
 export interface ConnectionInfo {
+  /** Workspace id — pool key. Profile id for saved connections, `adhoc-N` otherwise. */
+  id: string;
   profileId?: string | null;
   name: string;
   hostSummary: string;
@@ -211,6 +213,8 @@ export const api = {
     invoke<TestResult>("test_connection", args),
   connect: (profileId: string) => invoke<ConnectionInfo>("connect", { profileId }),
   connectInput: (input: ProfileInput) => invoke<ConnectionInfo>("connect_input", { input }),
+  switchWorkspace: (id: string) => invoke<ConnectionInfo>("switch_workspace", { id }),
+  disconnectWorkspace: (id: string) => invoke<void>("disconnect_workspace", { id }),
   disconnect: () => invoke<void>("disconnect"),
   serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 

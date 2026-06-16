@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { TopBar } from "@/components/layout/TopBar";
@@ -11,15 +12,20 @@ import { SplashScreen } from "@/components/SplashScreen";
 import { AboutDialog } from "@/components/AboutDialog";
 import { useConnections } from "@/stores/connections";
 import { useSettings } from "@/stores/settings";
-import { useStudio } from "@/stores/studio";
 import { StudioPane } from "@/components/studio/StudioPane";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { checkForUpdates } from "@/lib/updater";
 
 function App() {
   const status = useConnections((s) => s.status);
+  const activeId = useConnections((s) => s.activeId);
+  const restoring = useConnections((s) => s.restoring);
   const init = useConnections((s) => s.init);
-  const terminator = useStudio((s) => s.terminator);
+  // Terminator (Ognom Studio) mode is per workspace.
+  const terminator = useConnections((s) => {
+    const ws = s.workspaces.find((w) => w.info.id === s.activeId);
+    return ws?.terminator ?? false;
+  });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -80,7 +86,9 @@ function App() {
         {status === "connected" ? (
           <>
             <TopBar onOpenPalette={() => setPaletteOpen(true)} />
-            <div className="flex min-h-0 flex-1">
+            {/* key={activeId}: switching workspace remounts the panel so it
+                rebinds to the freshly-hydrated explorer slice for that one. */}
+            <div key={activeId ?? "none"} className="flex min-h-0 flex-1">
               {terminator ? (
                 <ErrorBoundary>
                   <StudioPane />
@@ -97,6 +105,10 @@ function App() {
             <StatusBar onAbout={() => setAboutOpen(true)} />
             <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
           </>
+        ) : restoring ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : (
           <WelcomeScreen />
         )}
