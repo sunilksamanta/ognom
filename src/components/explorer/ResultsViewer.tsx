@@ -128,7 +128,13 @@ function DocContextMenu({
 }) {
   const canMutate = "_id" in doc;
   return (
-    <ContextMenu>
+    // `modal={false}`: every item here opens a Dialog (View/Edit/Duplicate) or
+    // AlertDialog (Delete). A modal menu sets `pointer-events: none` on <body>
+    // and only restores it after its exit animation; the dialog mounts its own
+    // layer before then, the two race over the shared body style, and the body
+    // is left permanently unclickable — the whole app "hangs". Non-modal menus
+    // never touch <body>, so the dialog (modal, self-contained) opens cleanly.
+    <ContextMenu modal={false}>
       <ContextMenuTrigger asChild={asChild}>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => actions.onView(doc)}>
