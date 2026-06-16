@@ -3,7 +3,9 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  CopyPlus,
   Database,
+  Eraser,
   Eye,
   FolderOpen,
   Loader2,
@@ -11,8 +13,10 @@ import {
   PanelLeftOpen,
   RefreshCw,
   Search,
+  SquarePlus,
   Table2,
   Timer,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -27,8 +31,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DuplicateCollectionDialog } from "@/components/explorer/DuplicateCollectionDialog";
 import { useExplorer } from "@/stores/explorer";
 import { SIDEBAR_MAX, SIDEBAR_MIN, useSettings } from "@/stores/settings";
+import { api, errMsg } from "@/lib/api";
 import { formatBytes } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +56,9 @@ export function Sidebar() {
   const loadCollections = useExplorer((s) => s.loadCollections);
   const toggleDatabase = useExplorer((s) => s.toggleDatabase);
   const openCollection = useExplorer((s) => s.openCollection);
+  const openCollectionInNewTab = useExplorer((s) => s.openCollectionInNewTab);
+  const closeTabsForCollection = useExplorer((s) => s.closeTabsForCollection);
+  const refreshTabsForCollection = useExplorer((s) => s.refreshTabsForCollection);
   // Select the active collection as primitives, not the whole tab object — so
   // typing in an editor (which mutates the active tab) doesn't re-render the
   // entire database/collection tree on every keystroke.
@@ -60,12 +70,61 @@ export function Sidebar() {
     toast.success("Name copied");
   };
 
+  // Destructive / duplicate collection actions are driven by a single set of
+  // dialogs rendered once below, keyed off the target the menu item picks.
+  type Target = { db: string; coll: string };
+  const [dupTarget, setDupTarget] = useState<Target | null>(null);
+  const [clearTarget, setClearTarget] = useState<Target | null>(null);
+  const [dropTarget, setDropTarget] = useState<Target | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const doClear = async () => {
+    if (!clearTarget) return;
+    setBusy(true);
+    try {
+      const deleted = await api.clearCollection(clearTarget.db, clearTarget.coll);
+      toast.success(
+        `Cleared ${clearTarget.coll} — ${deleted} document${deleted === 1 ? "" : "s"} removed`
+      );
+      refreshTabsForCollection(clearTarget.db, clearTarget.coll);
+      setClearTarget(null);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doDrop = async () => {
+    if (!dropTarget) return;
+    setBusy(true);
+    try {
+      await api.dropCollection(dropTarget.db, dropTarget.coll);
+      toast.success(`Dropped ${dropTarget.coll}`);
+      closeTabsForCollection(dropTarget.db, dropTarget.coll);
+      await loadCollections(dropTarget.db);
+      setDropTarget(null);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const { sidebarWidth, sidebarCollapsed, setSidebarWidth, toggleSidebar } = useSettings();
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
   const dragging = useRef(false);
 
   useEffect(() => {
-    if (databases.length === 0) void loadDatabases();
+    // The panel is keyed by the active workspace (see App.tsx), so this effect
+    // remounts on every workspace switch. Always refetch the databases — and the
+    // collections of any databases restored expanded from cache — so a workspace
+    // we return to reflects current server state instead of a stale cached tree.
+    // The hydrated cache still renders instantly while these run.
+    void loadDatabases();
+    for (const [name, open] of Object.entries(expanded)) {
+      if (open) void loadCollections(name);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filter = sidebarFilter.trim().toLowerCase();
@@ -224,10 +283,17 @@ export function Sidebar() {
                       const isActive =
                         activeDb === db.name && activeColl === coll.name;
                       return (
-                        <ContextMenu key={coll.name}>
+                        // modal={false}: the destructive items below open a
+                        // Dialog from a menu item — a modal menu leaves
+                        // pointer-events stuck on <body> and freezes the app.
+                        <ContextMenu key={coll.name} modal={false}>
                           <ContextMenuTrigger asChild>
                             <button
+                              title={coll.name}
                               onClick={() => openCollection(db.name, coll.name)}
+                              onAuxClick={(e) =>
+                                e.button === 1 && openCollectionInNewTab(db.name, coll.name)
+                              }
                               className={cn(
                                 "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors",
                                 isActive
@@ -239,7 +305,7 @@ export function Sidebar() {
                               <span className="truncate">{coll.name}</span>
                             </button>
                           </ContextMenuTrigger>
-                          <ContextMenuContent>
+                          <ContextMenuContent className="min-w-[13rem]">
                             <ContextMenuLabel className="max-w-[200px] truncate">
                               {coll.name}
                             </ContextMenuLabel>
@@ -248,6 +314,12 @@ export function Sidebar() {
                               <FolderOpen />
                               Open
                             </ContextMenuItem>
+                            <ContextMenuItem
+                              onSelect={() => openCollectionInNewTab(db.name, coll.name)}
+                            >
+                              <SquarePlus />
+                              Open in new tab
+                            </ContextMenuItem>
                             <ContextMenuItem onSelect={() => void loadCollections(db.name)}>
                               <RefreshCw />
                               Refresh
@@ -255,6 +327,27 @@ export function Sidebar() {
                             <ContextMenuItem onSelect={() => copyName(coll.name)}>
                               <Copy />
                               Copy name
+                            </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              onSelect={() => setDupTarget({ db: db.name, coll: coll.name })}
+                            >
+                              <CopyPlus />
+                              Duplicate Collection
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              onSelect={() => setClearTarget({ db: db.name, coll: coll.name })}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Eraser />
+                              Clear Collection
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              onSelect={() => setDropTarget({ db: db.name, coll: coll.name })}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 />
+                              Drop Collection
                             </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
@@ -277,6 +370,55 @@ export function Sidebar() {
         onDoubleClick={() => setSidebarWidth(256)}
         title="Drag to resize · double-click to reset"
         className="absolute -right-px inset-y-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-primary/50 active:bg-primary/70"
+      />
+
+      <DuplicateCollectionDialog
+        open={!!dupTarget}
+        database={dupTarget?.db ?? ""}
+        source={dupTarget?.coll ?? ""}
+        onOpenChange={(o) => !o && setDupTarget(null)}
+        onDuplicated={() => dupTarget && void loadCollections(dupTarget.db)}
+      />
+
+      <ConfirmDialog
+        open={!!clearTarget}
+        onOpenChange={(o) => !o && setClearTarget(null)}
+        title="Clear collection?"
+        description={
+          clearTarget && (
+            <>
+              This permanently deletes{" "}
+              <span className="font-medium text-foreground">every document</span> in{" "}
+              <span className="font-mono font-medium text-foreground">{clearTarget.coll}</span>. The
+              collection and its indexes stay. This cannot be undone.
+            </>
+          )
+        }
+        confirmLabel="Clear collection"
+        destructive
+        busy={busy}
+        confirmPhrase={clearTarget?.coll}
+        onConfirm={doClear}
+      />
+
+      <ConfirmDialog
+        open={!!dropTarget}
+        onOpenChange={(o) => !o && setDropTarget(null)}
+        title="Drop collection?"
+        description={
+          dropTarget && (
+            <>
+              This permanently deletes{" "}
+              <span className="font-mono font-medium text-foreground">{dropTarget.coll}</span> and
+              all of its documents and indexes. This cannot be undone.
+            </>
+          )
+        }
+        confirmLabel="Drop collection"
+        destructive
+        busy={busy}
+        confirmPhrase={dropTarget?.coll}
+        onConfirm={doDrop}
       />
     </aside>
   );

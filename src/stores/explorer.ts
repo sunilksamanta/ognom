@@ -150,8 +150,14 @@ interface ExplorerState {
   setSidebarFilter: (v: string) => void;
 
   openCollection: (database: string, collection: string) => void;
+  /** Always open a fresh tab, even if the collection is already open. */
+  openCollectionInNewTab: (database: string, collection: string) => void;
   openShellWithQuery: (database: string, collection: string, query: string) => void;
   closeTab: (id: string) => void;
+  /** Close every tab pointing at a collection (e.g. after it is dropped). */
+  closeTabsForCollection: (database: string, collection: string) => void;
+  /** Re-run the find for any open document tabs of a collection (e.g. after clear). */
+  refreshTabsForCollection: (database: string, collection: string) => void;
   setActiveTab: (id: string) => void;
   setTabMode: (id: string, mode: TabMode) => void;
 
@@ -170,6 +176,16 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? fn(t) : t)) }));
 
   const tab = (id: string) => get().tabs.find((t) => t.id === id);
+
+  const makeTab = (database: string, collection: string): Tab => ({
+    id: newId("tab"),
+    database,
+    collection,
+    mode: "documents",
+    docs: freshDocs(useSettings.getState().pageSize),
+    agg: freshAgg(),
+    shell: freshShell(collection),
+  });
 
   return {
     databases: [],
@@ -259,18 +275,15 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         set({ activeTabId: existing.id });
         return;
       }
-      const id = newId("tab");
-      const tab: Tab = {
-        id,
-        database,
-        collection,
-        mode: "documents",
-        docs: freshDocs(useSettings.getState().pageSize),
-        agg: freshAgg(),
-        shell: freshShell(collection),
-      };
-      set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
-      void get().runFind(id);
+      const tab = makeTab(database, collection);
+      set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+      void get().runFind(tab.id);
+    },
+
+    openCollectionInNewTab: (database, collection) => {
+      const tab = makeTab(database, collection);
+      set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+      void get().runFind(tab.id);
     },
 
     // Hand-off from Studio: open (or focus) a collection straight into Shell
@@ -311,6 +324,26 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         }
         return { tabs, activeTabId };
       });
+    },
+
+    closeTabsForCollection: (database, collection) => {
+      set((s) => {
+        const tabs = s.tabs.filter(
+          (t) => !(t.database === database && t.collection === collection)
+        );
+        const activeTabId = tabs.some((t) => t.id === s.activeTabId)
+          ? s.activeTabId
+          : tabs[tabs.length - 1]?.id ?? null;
+        return { tabs, activeTabId };
+      });
+    },
+
+    refreshTabsForCollection: (database, collection) => {
+      get()
+        .tabs.filter(
+          (t) => t.database === database && t.collection === collection && t.mode === "documents"
+        )
+        .forEach((t) => void get().runFind(t.id));
     },
 
     setActiveTab: (id) => set({ activeTabId: id }),

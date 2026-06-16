@@ -265,6 +265,18 @@ export const api = {
   deleteDocument: (database: string, collection: string, id: unknown) =>
     invoke<{ deleted: number }>("delete_document", { database, collection, id }),
 
+  // collection operations
+  dropCollection: (database: string, collection: string) =>
+    invoke<void>("drop_collection", { database, collection }),
+  clearCollection: (database: string, collection: string) =>
+    invoke<number>("clear_collection", { database, collection }),
+  duplicateCollection: (database: string, source: string, target: string) =>
+    invoke<{ documents: number; indexes: number }>("duplicate_collection", {
+      database,
+      source,
+      target,
+    }),
+
   // indexes & stats
   listIndexes: (database: string, collection: string) =>
     invoke<IndexInfo[]>("list_indexes", { database, collection }),

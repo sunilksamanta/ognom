@@ -3,6 +3,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 /** Canonical project links. */
 export const REPO_URL = "https://github.com/sunilksamanta/ognom";
 export const REPO_LABEL = "github.com/sunilksamanta/ognom";
+export const WEBSITE_URL = "https://ognom.dev";
+export const WEBSITE_LABEL = "ognom.dev";
 
 /**
  * Open a URL in the user's default browser. Uses the Tauri opener plugin in the

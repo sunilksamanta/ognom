@@ -27,6 +27,17 @@ export function Workspace() {
     );
   }
 
+  // Disambiguate multiple tabs of the same collection with an ordinal suffix:
+  // the first stays plain, later ones become "users (2)", "users (3)"…
+  const ordinalById = new Map<string, number>();
+  const seen = new Map<string, number>();
+  for (const t of tabs) {
+    const key = `${t.database}.${t.collection}`;
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    ordinalById.set(t.id, n);
+  }
+
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-background">
       {/* tab strip — empty area doubles as a window drag surface */}
@@ -36,6 +47,7 @@ export function Workspace() {
       >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
+          const ordinal = ordinalById.get(tab.id) ?? 1;
           return (
             <div
               key={tab.id}
@@ -55,6 +67,7 @@ export function Workspace() {
               <span className="truncate">
                 <span className="text-muted-foreground">{tab.database}.</span>
                 {tab.collection}
+                {ordinal > 1 && <span className="text-muted-foreground"> ({ordinal})</span>}
               </span>
               <button
                 onClick={(e) => {

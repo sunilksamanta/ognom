@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { OgnomMark } from "@/components/WelcomeScreen";
 import { checkForUpdates } from "@/lib/updater";
-import { openExternal, REPO_URL, REPO_LABEL } from "@/lib/links";
+import { openExternal, REPO_URL, REPO_LABEL, WEBSITE_URL, WEBSITE_LABEL } from "@/lib/links";
 
 interface AboutDialogProps {
   open: boolean;
@@ -51,7 +51,17 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
               <p className="mt-0.5 font-mono text-xs font-medium text-primary/80">v{version}</p>
             )}
           </div>
-          <p className="text-sm text-muted-foreground">The free, no-nonsense MongoDB client.</p>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-sm text-muted-foreground">The free, no-nonsense MongoDB client.</p>
+            <button
+              type="button"
+              onClick={() => void openExternal(WEBSITE_URL)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary/90 transition-colors hover:text-primary hover:underline"
+            >
+              {WEBSITE_LABEL}
+              <ExternalLink className="h-3 w-3" />
+            </button>
+          </div>
         </div>
 
         {/* Free & Open — the heart of it */}

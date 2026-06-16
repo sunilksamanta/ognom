@@ -682,6 +682,102 @@ pub async fn delete_document(
 }
 
 // ---------------------------------------------------------------------------
+// collection operations
+// ---------------------------------------------------------------------------
+
+/// Drop a collection (or view) entirely — documents, indexes and all.
+#[tauri::command]
+pub async fn drop_collection(
+    database: String,
+    collection: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let client = current_client(&state).await?;
+    client
+        .database(&database)
+        .collection::<Document>(&collection)
+        .drop()
+        .await?;
+    Ok(())
+}
+
+/// Empty a collection — delete every document but keep the collection and its
+/// indexes. Returns how many documents were removed.
+#[tauri::command]
+pub async fn clear_collection(
+    database: String,
+    collection: String,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let result = coll.delete_many(doc! {}).await?;
+    Ok(result.deleted_count)
+}
+
+/// Copy a collection into a new one under the same database: all documents
+/// (server-side via `$out`, so nothing round-trips through the UI) plus its
+/// secondary indexes. Refuses to overwrite an existing collection.
+#[tauri::command]
+pub async fn duplicate_collection(
+    database: String,
+    source: String,
+    target: String,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let db = client.database(&database);
+
+    let target = target.trim().to_string();
+    if target.is_empty() {
+        return Err(AppError::Parse("new collection name is required".into()));
+    }
+    if target == source {
+        return Err(AppError::Other("the new name must differ from the source".into()));
+    }
+    let existing: Vec<String> = db.list_collection_names().await?;
+    if existing.iter().any(|n| *n == target) {
+        return Err(AppError::Other(format!("a collection named '{target}' already exists")));
+    }
+
+    // Copy the documents. `$out` reads the whole source and writes the target
+    // server-side; `try_collect` drives the cursor so the write completes.
+    let src = db.collection::<Document>(&source);
+    let _: Vec<Document> = src.aggregate(vec![doc! {"$out": &target}]).await?.try_collect().await?;
+
+    // `$out` skips the target when the source is empty — make sure it exists.
+    let after: Vec<String> = db.list_collection_names().await?;
+    if !after.iter().any(|n| *n == target) {
+        db.create_collection(&target).await?;
+    }
+
+    // `$out` copies documents but not secondary indexes — recreate them. A view
+    // has no listable indexes, so fall back to none rather than failing.
+    let dst = db.collection::<Document>(&target);
+    let models: Vec<IndexModel> = match src.list_indexes().await {
+        Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let mut indexes = 0u32;
+    for model in models {
+        let is_id = model
+            .options
+            .as_ref()
+            .and_then(|o| o.name.as_deref())
+            .map(|n| n == "_id_")
+            .unwrap_or(false);
+        if is_id {
+            continue;
+        }
+        dst.create_index(model).await?;
+        indexes += 1;
+    }
+
+    let documents = dst.estimated_document_count().await?;
+    Ok(json!({ "documents": documents, "indexes": indexes }))
+}
+
+// ---------------------------------------------------------------------------
 // indexes & stats
 // ---------------------------------------------------------------------------
 
