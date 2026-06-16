@@ -1,19 +1,27 @@
 import { useState, type ReactNode } from "react";
 import {
+  ArrowRightLeft,
   BarChart3,
   BookOpen,
+  Boxes,
   Code2,
   Cpu,
+  Download,
   Gauge,
   Keyboard,
   Layers,
   Lightbulb,
+  Link2,
   ListTree,
+  Lock,
   MessagesSquare,
   PanelsTopLeft,
+  PlugZap,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
   SquareTerminal,
+  Upload,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -110,6 +118,7 @@ function Example({ q, children }: { q: string; children: ReactNode }) {
 
 const SECTIONS = [
   { id: "overview", label: "Overview", icon: BookOpen },
+  { id: "connections", label: "Connections", icon: Boxes },
   { id: "studio", label: "Studio (no-code)", icon: Cpu },
   { id: "shell", label: "Shell & Explorer", icon: SquareTerminal },
   { id: "examples", label: "Examples", icon: Lightbulb },
@@ -139,9 +148,11 @@ function Overview() {
       </div>
       <H>Getting connected</H>
       <P>
-        Use the connection pill at the top-left to add or switch connections. Once connected, the
-        sidebar lists every database and collection — click one to open it in a tab, or press{" "}
-        <Kbd>{MOD} K</Kbd> to jump straight to a collection by name.
+        Use the connection name at the top-left to add or switch connections — you can keep several
+        open at once and switch between them in a click (see{" "}
+        <strong className="text-foreground">Connections</strong>). Once connected, the sidebar lists
+        every database and collection — click one to open it in a tab, or press <Kbd>{MOD} K</Kbd> to
+        jump straight to a collection by name.
       </P>
       <H>Which mode should I use?</H>
       <P>
@@ -149,6 +160,70 @@ function Overview() {
         Documents/Aggregate/Shell give you everything plus an AI assistant. If you just want answers
         and charts from your data, switch to <strong className="text-foreground">Terminator</strong>{" "}
         and chat.
+      </P>
+    </>
+  );
+}
+
+function Connections() {
+  return (
+    <>
+      <H>Many connections, one click to switch</H>
+      <P>
+        The connection name at the top-left is your <strong className="text-foreground">active
+        workspace</strong>. Connect to as many servers as you like — when there's room they sit
+        side-by-side as pills for one-click switching, and the rest tuck into a switcher you open by
+        clicking the name. Each workspace is fully independent.
+      </P>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Feature icon={ArrowRightLeft} title="Switch instantly">
+          Clicking a workspace flips to it with no reconnect — the connection stays live in the
+          background, so it's immediate.
+        </Feature>
+        <Feature icon={Layers} title="Each keeps its place">
+          Every workspace remembers its own open tabs, sidebar, and even whether it's in Normal or
+          Terminator mode.
+        </Feature>
+        <Feature icon={RotateCcw} title="Reopens where you left off">
+          The workspaces you had open reconnect automatically the next time you launch Ognom.
+        </Feature>
+        <Feature icon={PlugZap} title="Disconnect just one">
+          The plug icon closes the current workspace; the others stay connected. Or close any from
+          the switcher with the <Code>✕</Code>.
+        </Feature>
+      </div>
+
+      <H>Export &amp; import connections</H>
+      <P>
+        From the connection manager (the chevron next to the name → <em>Manage connections</em>), you
+        can move your saved connections between machines — two honest ways:
+      </P>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Feature icon={Download} title="Without passwords">
+          A portable file of just the connection details. Safe to share or store; you re-enter
+          passwords on import.
+        </Feature>
+        <Feature icon={Lock} title="Encrypted backup">
+          Includes credentials, re-encrypted under a <strong className="text-foreground">passphrase
+          you set</strong> (Argon2id + AES-256). The only safe way to carry passwords across
+          machines — there's no recovery if you lose the passphrase.
+        </Feature>
+        <Feature icon={Upload} title="Import">
+          Pick an export file; encrypted ones ask for the passphrase. Everything comes in as new
+          connections — your existing ones are untouched.
+        </Feature>
+        <Feature icon={Link2} title="Copy a connection string">
+          Each connection's menu copies its URI — <em>with</em> the password (for pasting into
+          mongosh) or <em>without</em>.
+        </Feature>
+      </div>
+
+      <H>Safe by default</H>
+      <P>
+        Credentials are <strong className="text-foreground">AES-256-GCM encrypted</strong> at rest;
+        the master key lives in a private key file or, with one toggle, your OS keychain — and never
+        leaves your machine (so a copied file can't be decrypted elsewhere). Deleting a connection
+        asks you to <strong className="text-foreground">type its name</strong> to confirm.
       </P>
     </>
   );
@@ -411,6 +486,7 @@ function Shortcuts() {
 
 const RENDER: Record<SectionId, () => ReactNode> = {
   overview: Overview,
+  connections: Connections,
   studio: Studio,
   shell: Shell,
   examples: Examples,

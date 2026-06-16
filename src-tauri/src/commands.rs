@@ -360,6 +360,70 @@ pub async fn disconnect(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
+/// The connection URI for a saved profile — with or without the password.
+#[tauri::command]
+pub fn connection_uri(
+    profile_id: String,
+    include_password: bool,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    let crypto = state.crypto();
+    let store = state.store.lock().unwrap();
+    if include_password {
+        store.uri_for(&profile_id, &crypto)
+    } else {
+        store.redacted_uri(&profile_id)
+    }
+}
+
+/// Write an export of saved connections to `path`. `include_secrets` requires a
+/// non-empty `passphrase`; the bundle is then passphrase-encrypted.
+#[tauri::command]
+pub fn export_connections(
+    ids: Option<Vec<String>>,
+    include_secrets: bool,
+    passphrase: Option<String>,
+    path: String,
+    state: State<'_, AppState>,
+) -> AppResult<u32> {
+    let crypto = state.crypto();
+    let conns = {
+        let store = state.store.lock().unwrap();
+        store.export(ids.as_deref(), &crypto, include_secrets)?
+    };
+    let count = conns.len() as u32;
+    let exported_at = chrono::Utc::now().to_rfc3339();
+    let content =
+        crate::portable::build_export(conns, include_secrets, passphrase.as_deref(), exported_at)?;
+    std::fs::write(&path, content)?;
+    Ok(count)
+}
+
+/// Peek at an export file to learn whether it's encrypted (so the UI knows
+/// whether to ask for a passphrase) and how many connections it holds.
+#[tauri::command]
+pub fn inspect_connection_import(path: String) -> AppResult<crate::portable::ImportPreview> {
+    let content = std::fs::read_to_string(&path)?;
+    crate::portable::inspect(&content)
+}
+
+/// Import connections from an export file, decrypting with `passphrase` when needed.
+#[tauri::command]
+pub fn import_connections(
+    path: String,
+    passphrase: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<crate::portable::ImportOutcome> {
+    let content = std::fs::read_to_string(&path)?;
+    let conns = crate::portable::parse_export(&content, passphrase.as_deref())?;
+    let crypto = state.crypto();
+    let (imported, needs_password) = {
+        let mut store = state.store.lock().unwrap();
+        store.import(conns, &crypto)?
+    };
+    Ok(crate::portable::ImportOutcome { imported, needs_password })
+}
+
 /// Detailed server diagnostics for the status-bar info dialog. Each admin
 /// command degrades independently — Atlas and other locked-down deployments
 /// forbid some of these (hostInfo, serverStatus), so those sections come back

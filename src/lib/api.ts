@@ -92,6 +92,19 @@ export interface ServerInfoRaw {
   connectionStatus: Doc | null;
 }
 
+/** Peek at a connections export file before importing. */
+export interface ImportPreview {
+  encrypted: boolean;
+  count: number;
+  exportedAt?: string | null;
+}
+
+export interface ImportOutcome {
+  imported: number;
+  /** How many imported connections still need a password / connection string. */
+  needsPassword: number;
+}
+
 export interface SecurityInfo {
   secretBackend: "keychain" | "file";
   /** Keychain was requested but unavailable; key file is in use. */
@@ -216,6 +229,18 @@ export const api = {
   switchWorkspace: (id: string) => invoke<ConnectionInfo>("switch_workspace", { id }),
   disconnectWorkspace: (id: string) => invoke<void>("disconnect_workspace", { id }),
   disconnect: () => invoke<void>("disconnect"),
+  connectionUri: (profileId: string, includePassword: boolean) =>
+    invoke<string>("connection_uri", { profileId, includePassword }),
+  exportConnections: (args: {
+    ids?: string[];
+    includeSecrets: boolean;
+    passphrase?: string;
+    path: string;
+  }) => invoke<number>("export_connections", args),
+  inspectConnectionImport: (path: string) =>
+    invoke<ImportPreview>("inspect_connection_import", { path }),
+  importConnections: (path: string, passphrase?: string) =>
+    invoke<ImportOutcome>("import_connections", { path, passphrase }),
   serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 
   // metadata

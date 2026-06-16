@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  ChevronDown,
   Copy,
+  Download,
   KeyRound,
+  Link2,
   Loader2,
   Lock,
   Pencil,
   Plus,
   Trash2,
+  Upload,
 } from "lucide-react";
 import {
   Dialog,
@@ -17,6 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +34,10 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConnectionForm, PROFILE_COLORS } from "@/components/connections/ConnectionForm";
+import { PassphraseDialog } from "@/components/connections/PassphraseDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { errMsg, type ProfileSummary } from "@/lib/api";
+import { api, errMsg, type ProfileSummary } from "@/lib/api";
+import { exportConnections, pickConnectionImport, runConnectionImport } from "@/lib/files";
 import { useConnections } from "@/stores/connections";
 import { timeAgo } from "@/lib/bson";
 import { cn } from "@/lib/utils";
@@ -38,12 +50,15 @@ interface ConnectionManagerProps {
 const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
 
 export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps) {
-  const { profiles, security, connect, connectingId, remove, save, setSecretBackend } =
+  const { profiles, security, connect, connectingId, remove, save, refresh, setSecretBackend } =
     useConnections();
   const [view, setView] = useState<"list" | "form">("list");
   const [editing, setEditing] = useState<ProfileSummary | null>(null);
   const [filter, setFilter] = useState("");
   const [deleting, setDeleting] = useState<ProfileSummary | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [exportPassOpen, setExportPassOpen] = useState(false);
+  const [importPath, setImportPath] = useState<string | null>(null); // encrypted import awaiting passphrase
 
   useEffect(() => {
     if (open) {
@@ -82,6 +97,44 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
     }
   };
 
+  const copyUri = async (id: string, withPassword: boolean) => {
+    try {
+      const uri = await api.connectionUri(id, withPassword);
+      await navigator.clipboard.writeText(uri);
+      toast.success(
+        withPassword
+          ? "Connection string copied — includes the password"
+          : "Connection string copied — without password"
+      );
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const finishImport = async (path: string, passphrase?: string) => {
+    setBusy(true);
+    const outcome = await runConnectionImport(path, passphrase);
+    setBusy(false);
+    if (outcome) {
+      await refresh();
+      setImportPath(null);
+    }
+  };
+
+  const handleImport = async () => {
+    const picked = await pickConnectionImport();
+    if (!picked) return;
+    if (picked.preview.encrypted) setImportPath(picked.path); // ask for the passphrase
+    else await finishImport(picked.path);
+  };
+
+  const handleExportFull = async (passphrase: string) => {
+    setBusy(true);
+    const ok = await exportConnections({ includeSecrets: true, passphrase });
+    setBusy(false);
+    if (ok) setExportPassOpen(false);
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -118,17 +171,58 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                     className="h-8"
                   />
                 )}
-                <Button
-                  size="sm"
-                  className="ml-auto shrink-0"
-                  onClick={() => {
-                    setEditing(null);
-                    setView("form");
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  New connection
-                </Button>
+                <div className="ml-auto flex shrink-0 gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void handleImport()}>
+                    <Upload className="h-4 w-4" />
+                    Import
+                  </Button>
+                  {profiles.length > 0 && (
+                    // modal={false}: "with passwords…" opens a Dialog from a menu item —
+                    // a modal menu would leave pointer-events stuck on <body>.
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <Download className="h-4 w-4" />
+                          Export
+                          <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-60">
+                        <DropdownMenuItem
+                          className="gap-2"
+                          onSelect={() => void exportConnections({ includeSecrets: false })}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <div className="min-w-0">
+                            <div>Export without passwords</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              Portable; re-enter passwords on import
+                            </div>
+                          </div>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="gap-2" onSelect={() => setExportPassOpen(true)}>
+                          <Lock className="h-3.5 w-3.5" />
+                          <div className="min-w-0">
+                            <div>Export with passwords…</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              Encrypted with a passphrase you set
+                            </div>
+                          </div>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setView("form");
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    New connection
+                  </Button>
+                </div>
               </div>
 
               <ScrollArea className="min-w-0 max-h-[420px]">
@@ -176,6 +270,28 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
                         className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <DropdownMenu modal={false}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                  <Link2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>Copy connection string</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => void copyUri(p.id, true)}>
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy connection string
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void copyUri(p.id, false)}>
+                              <Link2 className="h-3.5 w-3.5" />
+                              Copy without password
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
@@ -271,16 +387,43 @@ export function ConnectionManager({ open, onOpenChange }: ConnectionManagerProps
         description="The saved connection and its encrypted credentials will be removed. This cannot be undone."
         confirmLabel="Delete"
         destructive
+        busy={busy}
+        confirmPhrase={deleting?.name}
         onConfirm={async () => {
           if (!deleting) return;
+          setBusy(true);
           try {
             await remove(deleting.id);
             toast.success(`Deleted "${deleting.name}"`);
+            setDeleting(null);
           } catch (e) {
             toast.error(errMsg(e));
           } finally {
-            setDeleting(null);
+            setBusy(false);
           }
+        }}
+      />
+
+      <PassphraseDialog
+        open={exportPassOpen}
+        onOpenChange={(o) => !o && setExportPassOpen(false)}
+        title="Encrypt the export"
+        description="Set a passphrase. You'll need it to import these connections on another machine."
+        confirmLabel="Choose file & export"
+        requireConfirm
+        busy={busy}
+        onSubmit={handleExportFull}
+      />
+
+      <PassphraseDialog
+        open={importPath !== null}
+        onOpenChange={(o) => !o && setImportPath(null)}
+        title="Encrypted export"
+        description="This file is passphrase-protected. Enter the passphrase it was exported with."
+        confirmLabel="Import"
+        busy={busy}
+        onSubmit={(pass) => {
+          if (importPath) void finishImport(importPath, pass);
         }}
       />
     </>

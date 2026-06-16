@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 interface ConfirmDialogProps {
@@ -22,6 +23,9 @@ interface ConfirmDialogProps {
   /** Require an explicit "I know what I am doing" acknowledgement before confirming. */
   requireAck?: boolean;
   ackLabel?: string;
+  /** Require the user to type this exact phrase (e.g. the name) before confirming. */
+  confirmPhrase?: string;
+  confirmPhraseLabel?: ReactNode;
   onConfirm: () => void | Promise<void>;
 }
 
@@ -35,15 +39,25 @@ export function ConfirmDialog({
   busy = false,
   requireAck = false,
   ackLabel = "I know what I am doing",
+  confirmPhrase,
+  confirmPhraseLabel,
   onConfirm,
 }: ConfirmDialogProps) {
   const ackId = useId();
+  const phraseId = useId();
   const [ack, setAck] = useState(false);
+  const [phrase, setPhrase] = useState("");
 
-  // Reset the acknowledgement each time the dialog opens.
+  // Reset the guards each time the dialog opens.
   useEffect(() => {
-    if (open) setAck(false);
+    if (open) {
+      setAck(false);
+      setPhrase("");
+    }
   }, [open]);
+
+  const phraseOk = !confirmPhrase || phrase.trim() === confirmPhrase.trim();
+  const canConfirm = !busy && (!requireAck || ack) && phraseOk;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,6 +84,29 @@ export function ConfirmDialog({
           </Label>
         )}
 
+        {confirmPhrase && (
+          <div className="space-y-1.5">
+            <Label htmlFor={phraseId} className="text-xs font-normal text-muted-foreground">
+              {confirmPhraseLabel ?? (
+                <>
+                  Type <span className="font-mono font-medium text-foreground">{confirmPhrase}</span>{" "}
+                  to confirm
+                </>
+              )}
+            </Label>
+            <Input
+              id={phraseId}
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && canConfirm && void onConfirm()}
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              className="h-8"
+            />
+          </div>
+        )}
+
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
@@ -77,7 +114,7 @@ export function ConfirmDialog({
           <Button
             variant={destructive ? "destructive" : "default"}
             size="sm"
-            disabled={busy || (requireAck && !ack)}
+            disabled={!canConfirm}
             onClick={() => void onConfirm()}
           >
             {confirmLabel}

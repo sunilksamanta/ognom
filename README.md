@@ -48,6 +48,7 @@ Most database tools force a choice: **powerful but intimidating**, or **friendly
 
 - 🆓 **Free & open source.** No license keys, no locked "premium" tabs, no account, no telemetry.
 - 🪶 **Native & lightweight.** Built with Tauri (Rust + your OS webview) — a tiny binary and a fraction of the memory an Electron app burns.
+- 🗂️ **Many connections at once.** Open several servers as live **workspaces** and switch between them in one click — each keeps its own open tabs and sidebar.
 - 🔐 **Secure by default.** Credentials are encrypted at rest with AES‑256‑GCM; one toggle moves the key into your OS keychain. Passwords are never sent back to the UI.
 - 👥 **For developers _and_ the people they work with.** Flip one switch in the header and the whole app changes shape to fit the task in front of you.
 - ❓ **Never stuck.** A built‑in **Help** page (the `?` in the header) has guided examples for both developers and product owners.
@@ -83,7 +84,7 @@ Ask · join · chart · summarize · export.
 </tr>
 </table>
 
-One connection. One source of truth. The same safety guarantees underneath.
+One app, as many connections as you need — the same safety guarantees underneath every workspace.
 
 ---
 
@@ -93,6 +94,7 @@ One connection. One source of truth. The same safety guarantees underneath.
 
 | | |
 |---|---|
+| **Workspaces** | Connect to many servers at once and switch between them from the header — one click, no reconnect. Each workspace keeps its own open tabs and sidebar, and the ones you had open **reconnect automatically** next launch. |
 | **Browse** | Databases & collections sidebar with sizes, a search filter, and a `⌘K` jump‑to‑collection palette. Toggle the sidebar with `⌘B`. Right‑click menus everywhere — refresh, copy, edit, delete. |
 | **Two views, done well** | Documents render as **JSON** (collapsible, type‑colored, ObjectId/date aware) or a **table** (typed cells, sticky `_id`). |
 | **Visual Query Builder** | Build filters as `field · operator · value` rows with **autocomplete from your latest 1,000 documents**, Match‑ALL / Match‑ANY logic, and a deep operator set (between, starts/ends with, regex, in/not‑in, type, exists…). Drop to raw JSON anytime. |
@@ -101,6 +103,7 @@ One connection. One source of truth. The same safety guarantees underneath.
 | **Explain Plans** | Index usage, docs‑vs‑keys examined, timing, and a plain‑language verdict (*"collection scan — add an index"*) for find **and** aggregate. |
 | **Guided Index Builder** | Templates (single, compound, text, geo, hashed, TTL), a visual key editor, and full options (unique, sparse, hidden, partial filters, collation) — no syntax to memorize. |
 | **Export & Import** | Push query results or whole collections to **JSON / CSV**; import JSON / NDJSON. |
+| **Move connections** | Export your saved connections to a file and import them on another machine — either **without passwords** (re‑enter on import) or a **passphrase‑encrypted backup** that carries credentials safely. Copy any connection's string (with or without the password) in two clicks. Deleting one asks you to type its name first. |
 | **Shell** *(advanced)* | A real query editor — `db.users.find({}).sort({ gpa: -1 }).limit(5)` — with highlighting, history, a **drag‑resizable editor**, and helpers like `ObjectId()`, `ISODate()`, `NumberLong()`. |
 | **Safety‑first** | Destructive actions require an explicit *"I know what I'm doing"* confirmation. |
 
@@ -222,7 +225,7 @@ sudo dnf install ./Ognom-x.y.z-1.x86_64.rpm
 
 ## 🚀 Getting started
 
-1. **Connect.** Click the connection pill (top‑left) → add a connection. Paste a connection string, or fill in host/auth/TLS under *Advanced*.
+1. **Connect.** Click the connection name (top‑left) → **New connection**. Paste a connection string, or fill in host/auth/TLS under *Advanced*. Connect to more servers any time and switch between them from the same menu.
 2. **Explore (Normal mode).** Click a collection in the sidebar, or press `⌘K` to jump by name. Browse, build queries, aggregate.
 3. **Ask (Terminator mode).** Flip the header switch to **Terminator**, pick a database + collection (or **Whole database**), and type a question.
 4. **Add your AI key.** Studio and the Shell assistant need an OpenAI key — see below.
@@ -247,6 +250,7 @@ Studio and the Shell AI assistant use OpenAI. Set it up in **Settings → Prompt
 - Connection profiles live in your OS app‑data directory as JSON; **secrets are AES‑256‑GCM encrypted**.
 - The 256‑bit master key is generated on first run and stored in a private (`0600`) key file by default — no permission prompts, ever. Flip **"Guard the encryption key with the OS keychain"** to move it into the **macOS Keychain / Windows Credential Manager / Secret Service** (saved connections keep working). If the keychain becomes unreachable, Ognom falls back to the key file and **tells you so in the UI** — no silent downgrades.
 - The UI never receives stored secrets back; editing a connection keeps the stored password unless you type a new one.
+- **Exports are honest about secrets.** A *no‑passwords* export is plain, portable metadata — safe to share. A *full backup* re‑encrypts credentials under a **passphrase you choose** (Argon2id → AES‑256‑GCM); the master key never leaves your machine, so a naive copy of the on‑disk file can't be decrypted elsewhere.
 - The webview runs with a strict Content‑Security‑Policy and no remote content — Monaco and every asset are bundled locally, so the core app works fully offline.
 - Your queries go to **your** MongoDB server. Studio's AI prompts go only to **your** configured AI provider (OpenAI) using **your** key.
 

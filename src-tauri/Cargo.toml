@@ -1,6 +1,6 @@
 [package]
 name = "ognom"
-version = "1.6.0"
+version = "1.7.0"
 description = "Ognom — the free, lightweight, no-nonsense MongoDB desktop client"
 authors = ["Sunil Kr. Samanta"]
 license = "MIT"
@@ -34,6 +34,7 @@ json5 = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 aes-gcm = "0.10"
+argon2 = "0.5"
 base64 = "0.22"
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

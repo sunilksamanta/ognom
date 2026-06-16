@@ -1,6 +1,7 @@
 mod commands;
 mod crypto;
 mod error;
+mod portable;
 mod profiles;
 mod shell;
 
@@ -90,6 +91,10 @@ pub fn run() {
             commands::switch_workspace,
             commands::disconnect_workspace,
             commands::disconnect,
+            commands::connection_uri,
+            commands::export_connections,
+            commands::inspect_connection_import,
+            commands::import_connections,
             commands::server_info,
             commands::list_databases,
             commands::list_collections,

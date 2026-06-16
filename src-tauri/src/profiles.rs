@@ -465,6 +465,96 @@ impl ProfileStore {
         Ok(())
     }
 
+    /// The connection URI with the password omitted (for "copy without password").
+    pub fn redacted_uri(&self, id: &str) -> AppResult<String> {
+        let p = self.get(id)?;
+        match p.kind {
+            ProfileKind::Fields => p.fields.build_uri(None),
+            ProfileKind::Uri => Ok(p.uri_summary.clone().unwrap_or_default()),
+        }
+    }
+
+    /// Build export entries for the given profiles (all when `ids` is None).
+    /// With `include_secrets`, each profile's secret is decrypted into the entry.
+    pub fn export(
+        &self,
+        ids: Option<&[String]>,
+        crypto: &Crypto,
+        include_secrets: bool,
+    ) -> AppResult<Vec<crate::portable::ExportConn>> {
+        let mut out = Vec::new();
+        for p in &self.profiles {
+            if let Some(ids) = ids {
+                if !ids.iter().any(|i| i == &p.id) {
+                    continue;
+                }
+            }
+            let secret = match (&p.secret_enc, include_secrets) {
+                (Some(enc), true) => Some(crypto.decrypt(enc)?),
+                _ => None,
+            };
+            out.push(crate::portable::ExportConn {
+                name: p.name.clone(),
+                color: p.color.clone(),
+                kind: p.kind.clone(),
+                fields: p.fields.clone(),
+                uri_summary: p.uri_summary.clone(),
+                secret,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Add imported connections as brand-new profiles (fresh ids), re-encrypting
+    /// any secret under the local master key. Returns (imported, needs_password).
+    pub fn import(
+        &mut self,
+        conns: Vec<crate::portable::ExportConn>,
+        crypto: &Crypto,
+    ) -> AppResult<(u32, u32)> {
+        let mut imported = 0u32;
+        let mut needs_password = 0u32;
+        for c in conns {
+            let secret_enc = match &c.secret {
+                Some(s) if !s.is_empty() => Some(crypto.encrypt(s)?),
+                _ => None,
+            };
+            // A connection "needs a password" if it authenticates but arrived
+            // without a secret (safe export, or a credential-less full export).
+            let requires_secret = match c.kind {
+                ProfileKind::Fields => none_if_blank(&c.fields.username).is_some(),
+                ProfileKind::Uri => true,
+            };
+            if requires_secret && secret_enc.is_none() {
+                needs_password += 1;
+            }
+
+            let mut name = c.name.trim().to_string();
+            if name.is_empty() {
+                name = "Imported connection".into();
+            }
+            if self.profiles.iter().any(|p| p.name == name) {
+                name = format!("{name} (imported)");
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            self.profiles.push(StoredProfile {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                color: c.color,
+                kind: c.kind,
+                fields: c.fields,
+                uri_summary: c.uri_summary,
+                secret_enc,
+                created_at: now,
+                last_used_at: None,
+            });
+            imported += 1;
+        }
+        self.persist()?;
+        Ok((imported, needs_password))
+    }
+
     /// Resolve the connection URI for a stored profile, decrypting its secret.
     pub fn uri_for(&self, id: &str, crypto: &Crypto) -> AppResult<String> {
         let p = self.get(id)?;
