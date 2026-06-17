@@ -1,4 +1,4 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Copy, CopyPlus, Eye, FileX2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,27 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { CodeEditor } from "@/components/CodeEditor";
 import { ValueTree } from "@/components/explorer/ValueTree";
 import { idLabel, kindOf, leafText, toPlainJson, toShellText, type BsonKind } from "@/lib/bson";
 import type { Doc } from "@/lib/api";
 import type { ViewMode } from "@/stores/explorer";
 import { cn } from "@/lib/utils";
+
+interface FieldPreview {
+  field: string;
+  value: unknown;
+  docLabel: string;
+}
 
 export interface DocActions {
   onView: (doc: Doc) => void;
@@ -254,9 +269,72 @@ function Cell({ value }: { value: unknown }) {
   );
 }
 
+function FieldValueDialog({
+  preview,
+  onClose,
+}: {
+  preview: FieldPreview | null;
+  onClose: () => void;
+}) {
+  const text = useMemo(
+    () => (preview ? toShellText(preview.value) : ""),
+    [preview],
+  );
+  const kind = preview ? kindOf(preview.value) : null;
+  const summary =
+    kind === "array"
+      ? `Array · ${(preview!.value as unknown[]).length} items`
+      : kind === "object"
+        ? `Object · ${Object.keys(preview!.value as object).length} fields`
+        : kind ?? "";
+
+  return (
+    <Dialog open={!!preview} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle className="font-mono text-sm">
+            {preview?.field ?? ""}
+          </DialogTitle>
+          <DialogDescription className="font-mono text-xs">
+            {summary}
+            {preview ? ` · ${preview.docLabel}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        {preview && (
+          <CodeEditor
+            value={text}
+            readOnly
+            height="50vh"
+            path={`dialog/field-preview/${preview.field}`}
+          />
+        )}
+
+        <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              await navigator.clipboard.writeText(text);
+              toast.success("Field copied");
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            Copy value
+          </Button>
+          <Button size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const MAX_COLUMNS = 40;
 
 function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
+  const [preview, setPreview] = useState<FieldPreview | null>(null);
   const columns = useMemo(() => {
     const freq = new Map<string, number>();
     for (const doc of docs) {
@@ -272,6 +350,7 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
+      <FieldValueDialog preview={preview} onClose={() => setPreview(null)} />
       <table className="w-full border-separate border-spacing-0 font-data">
         <thead className="sticky top-0 z-10">
           <tr>
@@ -297,14 +376,32 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
               onDoubleClick={() => actions.onView(doc)}
               className="group transition-colors odd:bg-muted/30 hover:bg-accent/60"
             >
-              {columns.visible.map((col) => (
-                <td
-                  key={col}
-                  className="whitespace-nowrap border-b border-r border-border/60 px-2.5 py-1 align-top last:border-r-0"
-                >
-                  {col in doc ? <Cell value={doc[col]} /> : <span className="text-muted-foreground/40">—</span>}
-                </td>
-              ))}
+              {columns.visible.map((col) => {
+                const present = col in doc;
+                const value = present ? doc[col] : undefined;
+                const kind = present ? kindOf(value) : null;
+                const expandable = kind === "object" || kind === "array";
+                return (
+                  <td
+                    key={col}
+                    onClick={
+                      expandable
+                        ? (e) => {
+                            e.stopPropagation();
+                            setPreview({ field: col, value, docLabel: `_id ${idLabel(doc)}` });
+                          }
+                        : undefined
+                    }
+                    title={expandable ? "Click to inspect field" : undefined}
+                    className={cn(
+                      "whitespace-nowrap border-b border-r border-border/60 px-2.5 py-1 align-top last:border-r-0",
+                      expandable && "cursor-pointer hover:bg-accent/40",
+                    )}
+                  >
+                    {present ? <Cell value={value} /> : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                );
+              })}
               {columns.hidden > 0 && <td className="border-b border-border/60" />}
               <td className="sticky right-0 w-0 border-b border-border/60 p-0">
                 <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 items-center rounded-l-md bg-accent/95 px-1 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
