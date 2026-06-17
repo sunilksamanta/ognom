@@ -288,7 +288,6 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
                 +{columns.hidden} more
               </th>
             )}
-            <th className="sticky right-0 w-0 border-b bg-card" />
           </tr>
         </thead>
         <tbody>
@@ -307,12 +306,10 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
                 </td>
               ))}
               {columns.hidden > 0 && <td className="border-b border-border/60" />}
-              <td className="sticky right-0 border-b border-border/60 bg-background px-1 py-0.5 align-top">
-                <RowActions
-                  doc={doc}
-                  actions={actions}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                />
+              <td className="sticky right-0 w-0 border-b border-border/60 p-0">
+                <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 items-center rounded-l-md bg-accent/95 px-1 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                  <RowActions doc={doc} actions={actions} />
+                </div>
               </td>
             </tr>
             </DocContextMenu>
