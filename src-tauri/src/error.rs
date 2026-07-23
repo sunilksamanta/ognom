@@ -10,7 +10,7 @@ pub enum AppError {
     #[error("{0}")]
     Mongo(String),
 
-    #[error("Invalid query: {0}")]
+    #[error("Parse error: {0}")]
     Parse(String),
 
     #[error("Storage error: {0}")]
