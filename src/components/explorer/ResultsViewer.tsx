@@ -331,10 +331,11 @@ function FieldValueDialog({
   );
 }
 
-const MAX_COLUMNS = 40;
-
 function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
   const [preview, setPreview] = useState<FieldPreview | null>(null);
+  // Every field across the page becomes a column, ordered by how often it
+  // appears (then alphabetically). Row count is already capped by the page
+  // size, so the full column set stays cheap to render inside the scroller.
   const columns = useMemo(() => {
     const freq = new Map<string, number>();
     for (const doc of docs) {
@@ -344,8 +345,7 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
     }
     const keys = [...freq.keys()].filter((k) => k !== "_id");
     keys.sort((a, b) => freq.get(b)! - freq.get(a)! || a.localeCompare(b));
-    const ordered = freq.has("_id") ? ["_id", ...keys] : keys;
-    return { visible: ordered.slice(0, MAX_COLUMNS), hidden: Math.max(0, ordered.length - MAX_COLUMNS) };
+    return freq.has("_id") ? ["_id", ...keys] : keys;
   }, [docs]);
 
   return (
@@ -354,7 +354,7 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
       <table className="w-full border-separate border-spacing-0 font-data">
         <thead className="sticky top-0 z-10">
           <tr>
-            {columns.visible.map((col) => (
+            {columns.map((col) => (
               <th
                 key={col}
                 className="whitespace-nowrap border-b border-r bg-card px-2.5 py-1.5 text-left text-[11px] font-semibold text-muted-foreground last:border-r-0"
@@ -362,11 +362,6 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
                 {col}
               </th>
             ))}
-            {columns.hidden > 0 && (
-              <th className="whitespace-nowrap border-b bg-card px-2.5 py-1.5 text-left text-[11px] font-normal text-muted-foreground/60">
-                +{columns.hidden} more
-              </th>
-            )}
           </tr>
         </thead>
         <tbody>
@@ -376,7 +371,7 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
               onDoubleClick={() => actions.onView(doc)}
               className="group transition-colors odd:bg-muted/30 hover:bg-accent/60"
             >
-              {columns.visible.map((col) => {
+              {columns.map((col) => {
                 const present = col in doc;
                 const value = present ? doc[col] : undefined;
                 const kind = present ? kindOf(value) : null;
@@ -402,7 +397,6 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
                   </td>
                 );
               })}
-              {columns.hidden > 0 && <td className="border-b border-border/60" />}
               <td className="sticky right-0 w-0 border-b border-border/60 p-0">
                 <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 items-center rounded-l-md bg-accent/95 px-1 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
                   <RowActions doc={doc} actions={actions} />
