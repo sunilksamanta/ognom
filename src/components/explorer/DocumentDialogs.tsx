@@ -39,8 +39,10 @@ export function DocumentDialogs({
 }: DocumentDialogsProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setError(null);
     if (state.type === "edit" || state.type === "view") {
       setText(toShellText(state.doc));
     } else if (state.type === "insert") {
@@ -57,6 +59,7 @@ export function DocumentDialogs({
 
   const handleSave = async () => {
     setBusy(true);
+    setError(null);
     try {
       if (state.type === "edit") {
         await api.replaceDocument(database, collection, docId(state.doc), text);
@@ -68,7 +71,7 @@ export function DocumentDialogs({
       onMutated();
       onClose();
     } catch (e) {
-      toast.error(errMsg(e));
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -94,13 +97,25 @@ export function DocumentDialogs({
           {editorOpen && (
             <CodeEditor
               value={text}
-              onChange={setText}
+              onChange={(v) => {
+                setText(v);
+                if (error) setError(null);
+              }}
               onRun={state.type !== "view" ? () => void handleSave() : undefined}
               readOnly={state.type === "view"}
               height="46vh"
               autoFocus={state.type !== "view"}
               path="dialog/document-editor"
             />
+          )}
+
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive"
+            >
+              {error}
+            </p>
           )}
 
           {state.type === "edit" && (

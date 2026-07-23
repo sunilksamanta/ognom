@@ -194,10 +194,40 @@ pub fn normalize_numbers(v: Value) -> Value {
 
 /// Parse one shell-flavored JSON value (document, array, string, number…).
 pub fn parse_value(text: &str) -> AppResult<Value> {
-    let prepared = convert_helpers(text.trim());
-    let parsed: Value = json5::from_str(&prepared)
-        .map_err(|e| AppError::Parse(format!("{e}")))?;
+    let trimmed = text.trim();
+    let prepared = convert_helpers(trimmed);
+    let parsed: Value = json5::from_str(&prepared).map_err(|e| friendly_parse_error(e, trimmed))?;
     Ok(normalize_numbers(parsed))
+}
+
+/// Turn json5's raw pest diagnostic (a multi-line ASCII caret dump) into a
+/// single readable sentence pointing at the offending line.
+///
+/// `convert_helpers` rewrites the text before json5 sees it (e.g. `ISODate("…")`
+/// → `{"$date":"…"}`), which shifts columns but never adds or removes newlines —
+/// so the reported *line* still lines up with the user's editor, but the column
+/// does not. We surface the line (and its text), not the bogus column.
+fn friendly_parse_error(e: json5::Error, source: &str) -> AppError {
+    let json5::Error::Message { msg, location } = e;
+    let message = match location {
+        // A pest syntax error. Its `= expected …` list names grammar rules
+        // (e.g. "expected boolean or null" for a missing comma), which reads as
+        // gibberish to a user — so we swap it for a generic, actionable hint and
+        // point at the offending line instead.
+        Some(loc) => {
+            const HINT: &str = "invalid syntax — check for a missing comma, quote, colon, or bracket";
+            match source.lines().nth(loc.line - 1).map(str::trim) {
+                Some(line) if !line.is_empty() => {
+                    format!("near line {} (`{}`) — {}", loc.line, line, HINT)
+                }
+                _ => format!("near line {} — {}", loc.line, HINT),
+            }
+        }
+        // No location means a semantic error (e.g. "expected a document") whose
+        // message is already meaningful; pass it through.
+        None => msg.lines().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string()).unwrap_or_else(|| "could not parse".to_string()),
+    };
+    AppError::Parse(message)
 }
 
 /// Parse a filter/sort/projection text box: blank means empty document.
@@ -609,6 +639,22 @@ mod tests {
         assert_eq!(v, json!({"a": 5, "b": 5.5, "c": -3}));
         assert!(v["a"].is_i64());
         assert!(v["b"].is_f64());
+    }
+
+    #[test]
+    fn parse_error_points_at_the_editor_line() {
+        // A missing comma after the ISODate on line 4. The helper rewrite shifts
+        // columns, so the message must anchor on the line (with its text), not a
+        // bogus column, and must not carry the noisy pest caret dump.
+        let src = "{\n  _id: ObjectId(\"68946bc8207a437dfe44ce70\"),\n  status: true,\n  updatedAt: ISODate(\"2025-08-07T09:03:04.064Z\")\n  __v: 0\n}";
+        let err = parse_value(src).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("line 4"), "message was: {msg}");
+        assert!(msg.contains("updatedAt: ISODate"), "message was: {msg}");
+        assert!(msg.contains("a missing comma"), "message was: {msg}");
+        // The misleading pest grammar wording must not leak through.
+        assert!(!msg.contains("expected boolean"), "pest wording leaked: {msg}");
+        assert!(!msg.contains("-->") && !msg.contains('|'), "pest dump leaked: {msg}");
     }
 
     #[test]
