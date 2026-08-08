@@ -1,27 +1,70 @@
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { api, errMsg, type ImportOutcome, type ImportPreview } from "@/lib/api";
+import {
+  api,
+  errMsg,
+  type CopyProgress,
+  type ImportOutcome,
+  type ImportPreview,
+} from "@/lib/api";
 
-/** Prompt for a path and export matching documents to JSON or CSV. */
+/** Run a cancellable job with a live progress toast (docs so far + cancel). */
+async function withProgressToast(
+  label: string,
+  run: (jobId: string) => Promise<{ documents: number; canceled: boolean }>
+): Promise<{ documents: number; canceled: boolean } | null> {
+  const jobId = crypto.randomUUID();
+  const toastId = toast.loading(`${label}…`, {
+    action: { label: "Cancel", onClick: () => void api.cancelJob(jobId) },
+  });
+  let unlisten: UnlistenFn | null = null;
+  try {
+    unlisten = await listen<CopyProgress>("copy-progress", (e) => {
+      if (e.payload.jobId !== jobId) return;
+      const total = e.payload.total ? ` / ${e.payload.total.toLocaleString()}` : "";
+      toast.loading(`${label} — ${e.payload.copied.toLocaleString()}${total} documents`, {
+        id: toastId,
+        action: { label: "Cancel", onClick: () => void api.cancelJob(jobId) },
+      });
+    });
+    const outcome = await run(jobId);
+    toast.dismiss(toastId);
+    return outcome;
+  } catch (e) {
+    toast.dismiss(toastId);
+    toast.error(errMsg(e));
+    return null;
+  } finally {
+    unlisten?.();
+  }
+}
+
+export type ExportFormat = "json" | "csv" | "ndjson" | "bson";
+
+/** Prompt for a path and export matching documents — streamed, cancellable. */
 export async function exportCollection(args: {
   database: string;
   collection: string;
   filter: string;
   sort: string;
-  format: "json" | "csv";
+  format: ExportFormat;
 }) {
-  try {
-    const ext = args.format;
-    const path = await save({
-      title: `Export ${args.collection}`,
-      defaultPath: `${args.collection}.${ext}`,
-      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
-    });
-    if (!path) return;
-    const count = await api.exportCollection({ ...args, path });
-    toast.success(`Exported ${count} document${count === 1 ? "" : "s"}`);
-  } catch (e) {
-    toast.error(errMsg(e));
+  const ext = args.format;
+  const path = await save({
+    title: `Export ${args.collection}`,
+    defaultPath: `${args.collection}.${ext}`,
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+  }).catch(() => null);
+  if (!path) return;
+  const outcome = await withProgressToast(`Exporting ${args.collection}`, (jobId) =>
+    api.exportCollection({ ...args, path, jobId })
+  );
+  if (!outcome) return;
+  if (outcome.canceled) {
+    toast.info(`Export canceled — ${outcome.documents.toLocaleString()} documents written`);
+  } else {
+    toast.success(`Exported ${outcome.documents.toLocaleString()} document${outcome.documents === 1 ? "" : "s"}`);
   }
 }
 
@@ -87,20 +130,25 @@ export async function runConnectionImport(
   }
 }
 
-/** Prompt for a JSON/NDJSON file and import its documents. Returns true on success. */
+/** Prompt for a JSON/NDJSON/CSV/BSON file and import its documents —
+ *  streamed in batches, cancellable. Returns true when anything landed. */
 export async function importDocuments(database: string, collection: string): Promise<boolean> {
-  try {
-    const path = await open({
-      title: `Import into ${collection}`,
-      multiple: false,
-      filters: [{ name: "JSON", extensions: ["json", "ndjson", "jsonl"] }],
-    });
-    if (!path || typeof path !== "string") return false;
-    const count = await api.importDocuments(database, collection, path);
-    toast.success(`Imported ${count} document${count === 1 ? "" : "s"}`);
-    return true;
-  } catch (e) {
-    toast.error(errMsg(e));
-    return false;
+  const path = await open({
+    title: `Import into ${collection}`,
+    multiple: false,
+    filters: [
+      { name: "Data files", extensions: ["json", "ndjson", "jsonl", "csv", "bson"] },
+    ],
+  }).catch(() => null);
+  if (!path || typeof path !== "string") return false;
+  const outcome = await withProgressToast(`Importing into ${collection}`, (jobId) =>
+    api.importDocuments(database, collection, path, jobId)
+  );
+  if (!outcome) return false;
+  if (outcome.canceled) {
+    toast.info(`Import canceled — ${outcome.documents.toLocaleString()} documents inserted`);
+  } else {
+    toast.success(`Imported ${outcome.documents.toLocaleString()} document${outcome.documents === 1 ? "" : "s"}`);
   }
+  return outcome.documents > 0;
 }

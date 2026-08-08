@@ -28,8 +28,9 @@ import { ValueTree } from "@/components/explorer/ValueTree";
 import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
 import { useExplorer, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
-import { useStudio } from "@/stores/studio";
+import { useStudio, aiNotReadyMessage, aiReady } from "@/stores/studio";
 import { api, errMsg, type Doc } from "@/lib/api";
+import { setShellCompletions } from "@/lib/monaco";
 import { optimizeQuery, QUICK_PROMPTS, type TokenUsage } from "@/lib/ai";
 import { TokenBadge } from "@/components/TokenBadge";
 
@@ -42,7 +43,8 @@ export function ShellPane({ tab }: { tab: Tab }) {
   const runShell = useExplorer((s) => s.runShell);
   const { shellHistory, clearShellHistory, shellEditorHeight, setShellEditorHeight } =
     useSettings();
-  const apiKey = useStudio((s) => s.apiKey);
+  const provider = useStudio((s) => s.provider);
+  const ready = useStudio((s) => aiReady(s));
   const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
 
   // Stable across keystrokes so the memoized ResultsViewer doesn't rebuild
@@ -78,19 +80,31 @@ export function ShellPane({ tab }: { tab: Tab }) {
   const s = tab.shell;
   const outcome = s.outcome;
 
-  // Schema fields sharpen the AI's index/optimization suggestions.
+  // Schema fields sharpen the AI's index/optimization suggestions — and feed
+  // the Monaco completion provider (field paths inside filter bodies).
   useEffect(() => {
     setFields([]);
     api
       .collectionFields(tab.database, tab.collection, 1000)
-      .then(setFields)
+      .then((f) => {
+        setFields(f);
+        setShellCompletions({ fields: f });
+      })
       .catch(() => {});
   }, [tab.database, tab.collection]);
 
+  // Collection names for `db.<tab>` completions in the shell editor.
+  useEffect(() => {
+    api
+      .listCollections(tab.database)
+      .then((cs) => setShellCompletions({ collections: cs.map((c) => c.name) }))
+      .catch(() => {});
+  }, [tab.database]);
+
   const ask = async (instruction: string) => {
     if (!s.text.trim()) return;
-    if (!apiKey) {
-      toast.error("Add your OpenAI API key in Settings → Prompts & AI to use AI assist");
+    if (!ready) {
+      toast.error(aiNotReadyMessage(provider));
       return;
     }
     setThinking(true);

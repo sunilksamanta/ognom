@@ -18,6 +18,7 @@ import {
   Lightbulb,
   Loader2,
   MessageSquarePlus,
+  Pin,
   SendHorizonal,
   ShieldCheck,
   Sparkles,
@@ -40,8 +41,15 @@ import {
   type ChartType,
 } from "@/components/studio/CanvasChart";
 import { useExplorer } from "@/stores/explorer";
-import { useStudio, AI_MODE_META, type AiMode } from "@/stores/studio";
+import {
+  useStudio,
+  aiNotReadyMessage,
+  aiReady,
+  AI_MODE_META,
+  type AiMode,
+} from "@/stores/studio";
 import { useChat, WHOLE_DB, type ChatSession, type ChatTurn } from "@/stores/chat";
+import { useInsights } from "@/stores/insights";
 import { api, errMsg, type Doc } from "@/lib/api";
 import {
   addUsage,
@@ -221,6 +229,8 @@ export function StudioChat({
   fields,
   onOptimize,
   onOpenSession,
+  initialPrompt,
+  onInitialPromptSent,
 }: {
   database: string;
   /** a collection name, or WHOLE_DB */
@@ -230,10 +240,15 @@ export function StudioChat({
   onOptimize: (query: string, collection: string) => void;
   /** Restore a past chat's database + scope, then activate it. */
   onOpenSession: (session: ChatSession) => void;
+  /** Auto-send once on mount — used by pinned insights. */
+  initialPrompt?: string;
+  /** Called when the initial prompt has been fired, so the owner can clear it. */
+  onInitialPromptSent?: () => void;
 }) {
   const collections = useExplorer((s) => s.collections);
   const loadCollections = useExplorer((s) => s.loadCollections);
-  const apiKey = useStudio((s) => s.apiKey);
+  const provider = useStudio((s) => s.provider);
+  const ready = useStudio((s) => aiReady(s));
   const { sessions, activeId, newSession, setActive, addTurn, patchTurn, deleteSession, clearAll } =
     useChat();
 
@@ -350,8 +365,8 @@ export function StudioChat({
   };
 
   const loadSuggestions = async () => {
-    if (!apiKey) {
-      toast.error("Add your OpenAI API key to use AI suggestions");
+    if (!ready) {
+      toast.error(aiNotReadyMessage(provider));
       return;
     }
     setSuggesting(true);
@@ -383,8 +398,8 @@ export function StudioChat({
   const send = async (raw: string) => {
     const prompt = raw.trim();
     if (!prompt || busy) return;
-    if (!apiKey) {
-      toast.error("Add your OpenAI API key in Settings → Prompts & AI to use Studio");
+    if (!ready) {
+      toast.error(aiNotReadyMessage(provider));
       return;
     }
 
@@ -423,7 +438,9 @@ export function StudioChat({
 
       let page;
       if (plan.kind === "aggregate" && plan.stages?.length) {
-        page = await api.aggregate(database, runColl, plan.stages, multi);
+        // readOnly: true — the backend hard-rejects write stages ($out/$merge)
+        // on Studio's execution path, independent of the prompt-level guard.
+        page = await api.aggregate(database, runColl, plan.stages, multi, true);
       } else {
         page = await api.findDocuments({
           database,
@@ -455,6 +472,15 @@ export function StudioChat({
       setBusy(false);
     }
   };
+
+  // Pinned-insight rerun: fire the prompt once as soon as the pane mounts.
+  const initialSent = useRef(false);
+  useEffect(() => {
+    if (!initialPrompt || initialSent.current || busy || !ready) return;
+    initialSent.current = true;
+    onInitialPromptSent?.();
+    void send(initialPrompt);
+  }, [initialPrompt, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const samples = multi ? SAMPLE_MULTI : SAMPLE_SINGLE;
   const scopeLabel = multi ? "Whole database" : scope;
@@ -529,7 +555,7 @@ export function StudioChat({
             ) : (
               turns.map((t) =>
                 t.role === "user" ? (
-                  <UserBubble key={t.id} text={t.text ?? ""} />
+                  <UserBubble key={t.id} text={t.text ?? ""} database={database} scope={scope} />
                 ) : (
                   <AssistantTurn
                     key={t.id}
@@ -855,9 +881,47 @@ function Composer({
   );
 }
 
-function UserBubble({ text }: { text: string }) {
+function UserBubble({
+  text,
+  database,
+  scope,
+}: {
+  text: string;
+  database: string;
+  scope: string;
+}) {
+  const addInsight = useInsights((s) => s.addInsight);
+  const removeInsight = useInsights((s) => s.removeInsight);
+  const pinned = useInsights((s) =>
+    s.insights.find((i) => i.prompt === text && i.database === database && i.scope === scope)
+  );
   return (
-    <div className="flex justify-end">
+    <div className="group flex items-center justify-end gap-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => {
+              if (pinned) {
+                removeInsight(pinned.id);
+                toast.success("Insight unpinned");
+              } else {
+                addInsight({ prompt: text, database, scope });
+                toast.success("Pinned — rerun it any time from the Studio home");
+              }
+            }}
+            className={cn(
+              "rounded p-1 text-muted-foreground transition-all hover:text-primary",
+              pinned ? "text-primary" : "opacity-0 group-hover:opacity-100"
+            )}
+            aria-label={pinned ? "Unpin insight" : "Pin as insight"}
+          >
+            <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {pinned ? "Unpin insight" : "Pin as insight — rerun from the Studio home"}
+        </TooltipContent>
+      </Tooltip>
       <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3.5 py-2 text-sm text-primary-foreground shadow-sm">
         {text}
       </div>

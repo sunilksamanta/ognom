@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import { activeAiConfig, useStudio } from "@/stores/studio";
+import { activeAiConfig, PROVIDER_META, useStudio } from "@/stores/studio";
 
 /** Token usage for one or more AI calls. */
 export interface TokenUsage {
@@ -21,13 +21,19 @@ async function chat(
 ): Promise<{ text: string; usage: TokenUsage }> {
   const state = useStudio.getState();
   const cfg = activeAiConfig(state);
+  if (!cfg.model) {
+    throw new Error(
+      `Set a model for ${PROVIDER_META[cfg.provider].label} in Settings → Prompts & AI`
+    );
+  }
   const res = await api.aiChat({
-    apiKey: state.apiKey,
+    provider: cfg.provider,
     model: cfg.model,
     system,
     user,
     jsonMode,
     reasoning: cfg.reasoning,
+    baseUrl: cfg.baseUrl,
   });
   return {
     text: res.content,
@@ -330,6 +336,34 @@ export const QUICK_PROMPTS: { id: string; label: string; instruction: string }[]
       "Make this query safe to run on a large production collection: add limits/projections where missing.",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// 3) Explain-plan interpretation
+// ---------------------------------------------------------------------------
+
+const EXPLAIN_SYSTEM = `You are a MongoDB performance expert reading an explain plan inside a database GUI.
+Respond with plain text (no markdown, no JSON): 3-6 short lines.
+Line 1: a one-sentence verdict — is this query healthy or not, and why.
+Then: what the plan actually did (index vs scan, docs examined vs returned, sort behavior).
+Then: the single most impactful fix, with an exact createIndex statement if an index would help.
+Be concrete and terse; never invent fields that aren't in the plan.`;
+
+/** Plain-language reading of an explain plan + the top recommended fix. */
+export async function interpretExplain(args: {
+  database: string;
+  collection: string;
+  summary: unknown;
+  raw: unknown;
+}): Promise<{ notes: string; usage: TokenUsage }> {
+  const rawText = JSON.stringify(args.raw);
+  const user = [
+    `Namespace: ${args.database}.${args.collection}`,
+    `Summary: ${JSON.stringify(args.summary)}`,
+    `Raw plan (may be truncated):\n${rawText.slice(0, 14000)}`,
+  ].join("\n");
+  const { text, usage } = await chat(EXPLAIN_SYSTEM, user, false);
+  return { notes: text.trim(), usage };
+}
 
 export async function optimizeQuery(args: {
   query: string;

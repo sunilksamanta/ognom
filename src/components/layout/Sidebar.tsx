@@ -8,11 +8,14 @@ import {
   Eraser,
   Eye,
   FolderOpen,
+  GitCompare,
   Loader2,
+  Network,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
   Search,
+  Send,
   SquarePlus,
   Table2,
   Timer,
@@ -32,6 +35,9 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CopyCollectionDialog } from "@/components/explorer/CopyCollectionDialog";
+import { DiffCollectionDialog } from "@/components/explorer/DiffCollectionDialog";
+import { RelationsDialog } from "@/components/explorer/RelationsDialog";
 import { DuplicateCollectionDialog } from "@/components/explorer/DuplicateCollectionDialog";
 import { useExplorer } from "@/stores/explorer";
 import { SIDEBAR_MAX, SIDEBAR_MIN, useSettings } from "@/stores/settings";
@@ -74,6 +80,9 @@ export function Sidebar() {
   // dialogs rendered once below, keyed off the target the menu item picks.
   type Target = { db: string; coll: string };
   const [dupTarget, setDupTarget] = useState<Target | null>(null);
+  const [copyTarget, setCopyTarget] = useState<Target | null>(null);
+  const [diffTarget, setDiffTarget] = useState<Target | null>(null);
+  const [relationsDb, setRelationsDb] = useState<string | null>(null);
   const [clearTarget, setClearTarget] = useState<Target | null>(null);
   const [dropTarget, setDropTarget] = useState<Target | null>(null);
   const [busy, setBusy] = useState(false);
@@ -269,6 +278,10 @@ export function Sidebar() {
                       <Copy />
                       Copy name
                     </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => setRelationsDb(db.name)}>
+                      <Network />
+                      Schema map
+                    </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
 
@@ -336,6 +349,18 @@ export function Sidebar() {
                               Duplicate Collection
                             </ContextMenuItem>
                             <ContextMenuItem
+                              onSelect={() => setCopyTarget({ db: db.name, coll: coll.name })}
+                            >
+                              <Send />
+                              Copy to…
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              onSelect={() => setDiffTarget({ db: db.name, coll: coll.name })}
+                            >
+                              <GitCompare />
+                              Diff with…
+                            </ContextMenuItem>
+                            <ContextMenuItem
                               onSelect={() => setClearTarget({ db: db.name, coll: coll.name })}
                               className="text-destructive focus:text-destructive"
                             >
@@ -378,6 +403,31 @@ export function Sidebar() {
         source={dupTarget?.coll ?? ""}
         onOpenChange={(o) => !o && setDupTarget(null)}
         onDuplicated={() => dupTarget && void loadCollections(dupTarget.db)}
+      />
+
+      <CopyCollectionDialog
+        open={!!copyTarget}
+        database={copyTarget?.db ?? ""}
+        source={copyTarget?.coll ?? ""}
+        onOpenChange={(o) => !o && setCopyTarget(null)}
+        onCopied={(targetDb) => {
+          // Target landed in this workspace — refresh the tree so it shows up.
+          void loadDatabases();
+          void loadCollections(targetDb);
+        }}
+      />
+
+      <DiffCollectionDialog
+        open={!!diffTarget}
+        database={diffTarget?.db ?? ""}
+        source={diffTarget?.coll ?? ""}
+        onOpenChange={(o) => !o && setDiffTarget(null)}
+      />
+
+      <RelationsDialog
+        open={!!relationsDb}
+        database={relationsDb ?? ""}
+        onOpenChange={(o) => !o && setRelationsDb(null)}
       />
 
       <ConfirmDialog
