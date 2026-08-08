@@ -1,13 +1,16 @@
 {
   "name": "ognom",
   "private": true,
-  "version": "1.10.0",
+  "version": "1.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.8",
@@ -52,7 +55,8 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.7"
   },
   "description": "Free, lightweight, no-nonsense MongoDB desktop client",
   "license": "MIT",

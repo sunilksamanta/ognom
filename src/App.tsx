@@ -10,8 +10,13 @@ import { listen } from "@tauri-apps/api/event";
 import { CommandPalette } from "@/components/CommandPalette";
 import { SplashScreen } from "@/components/SplashScreen";
 import { AboutDialog } from "@/components/AboutDialog";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
+import { getVersion } from "@tauri-apps/api/app";
+import { seenVersion } from "@/lib/whatsnew";
 import { useConnections } from "@/stores/connections";
 import { useSettings } from "@/stores/settings";
+import { useStudio } from "@/stores/studio";
+import { api } from "@/lib/api";
 import { StudioPane } from "@/components/studio/StudioPane";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { checkForUpdates } from "@/lib/updater";
@@ -28,10 +33,40 @@ function App() {
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+
+  // Show the What's New slider once per version, after the splash settles.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void getVersion()
+        .then((v) => {
+          if (seenVersion() !== v) setWhatsNewOpen(true);
+        })
+        .catch(() => {});
+    }, 1600);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     void init();
     void checkForUpdates();
+    // One-time migration: a pre-v1.10 OpenAI key lived in localStorage. Move
+    // it into the backend's encrypted vault, then wipe the plaintext copy.
+    // Afterwards, refresh which providers have keys (vault is the truth).
+    void (async () => {
+      const studio = useStudio.getState();
+      const legacy = studio.apiKey.trim();
+      if (legacy) {
+        try {
+          studio.setKeysConfigured(await api.setAiKey("openai", legacy));
+          studio.setApiKey("");
+        } catch {
+          // Backend unavailable — retry on next launch; key stays local.
+        }
+      } else {
+        await studio.refreshKeys();
+      }
+    })();
   }, [init]);
 
   // System menu (Help → About / Check for Updates…)
@@ -113,7 +148,15 @@ function App() {
           <WelcomeScreen />
         )}
       </div>
-      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <AboutDialog
+        open={aboutOpen}
+        onOpenChange={setAboutOpen}
+        onWhatsNew={() => {
+          setAboutOpen(false);
+          setWhatsNewOpen(true);
+        }}
+      />
+      <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} />
     </TooltipProvider>
   );
 }

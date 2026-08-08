@@ -21,7 +21,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSettings } from "@/stores/settings";
-import { useStudio, AI_MODE_META, DEFAULT_MODEL, type AiMode } from "@/stores/studio";
+import {
+  useStudio,
+  aiReady,
+  AI_MODE_META,
+  AI_PROVIDERS,
+  PROVIDER_META,
+  type AiMode,
+  type AiProvider,
+} from "@/stores/studio";
+import { api } from "@/lib/api";
 import { checkForUpdates } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 
@@ -84,11 +93,45 @@ function AiModeSwitch({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function ProviderSelect() {
+  const { provider, setProvider } = useStudio();
+  return (
+    <Select value={provider} onValueChange={(v) => setProvider(v as AiProvider)}>
+      <SelectTrigger className="h-8 w-56 text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {AI_PROVIDERS.map((p) => (
+          <SelectItem key={p} value={p} className="text-xs">
+            {PROVIDER_META[p].label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Write-only key field: the key goes straight into the backend's encrypted
+ *  vault and is never read back into the webview. */
 function ApiKeyField() {
-  const { apiKey, setApiKey } = useStudio();
-  const [draft, setDraft] = useState(apiKey);
-  useEffect(() => setDraft(apiKey), [apiKey]);
-  const dirty = draft.trim() !== apiKey;
+  const provider = useStudio((s) => s.provider);
+  const keysConfigured = useStudio((s) => s.keysConfigured);
+  const setKeysConfigured = useStudio((s) => s.setKeysConfigured);
+  const meta = PROVIDER_META[provider];
+  const saved = keysConfigured.includes(provider);
+  const [draft, setDraft] = useState("");
+  useEffect(() => setDraft(""), [provider]);
+
+  const commit = async (key: string) => {
+    try {
+      setKeysConfigured(await api.setAiKey(provider, key));
+      toast.success(key.trim() ? `${meta.label} key saved` : `${meta.label} key cleared`);
+      setDraft("");
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
   return (
     <div className="flex w-full items-center gap-2">
       <div className="relative flex-1">
@@ -97,39 +140,51 @@ function ApiKeyField() {
           type="password"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="sk-…"
+          placeholder={saved ? "saved ✓ — enter a new key to replace" : meta.keyPlaceholder}
           className="h-8 pl-8 font-mono text-xs"
           spellCheck={false}
+          disabled={!meta.needsKey && provider !== "custom"}
         />
       </div>
       <Button
         size="sm"
         className="h-8"
-        variant={dirty ? "default" : "outline"}
-        disabled={!dirty}
-        onClick={() => {
-          setApiKey(draft);
-          toast.success(draft.trim() ? "API key saved" : "API key cleared");
-        }}
+        variant={draft.trim() ? "default" : "outline"}
+        disabled={!draft.trim()}
+        onClick={() => void commit(draft)}
       >
         <Check className="h-3.5 w-3.5" />
         Save
       </Button>
+      {saved && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 text-muted-foreground hover:text-destructive"
+          title="Remove the stored key"
+          onClick={() => void commit("")}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   );
 }
 
 function ModelField() {
-  const { model, setModel } = useStudio();
+  const provider = useStudio((s) => s.provider);
+  const model = useStudio((s) => s.models[s.provider] ?? "");
+  const setModel = useStudio((s) => s.setModel);
+  const fallback = PROVIDER_META[provider].defaultModel;
   // Local draft so typing doesn't hit the persisted store on every keystroke
   // (laggy) and an empty field doesn't instantly snap back to the default.
   const [draft, setDraft] = useState(model);
-  useEffect(() => setDraft(model), [model]);
+  useEffect(() => setDraft(model), [model, provider]);
 
   const commit = () => {
-    const next = draft.trim() || DEFAULT_MODEL;
+    const next = draft.trim() || fallback;
     setDraft(next);
-    if (next !== model) setModel(next);
+    if (next !== model) setModel(provider, next);
   };
 
   return (
@@ -139,25 +194,53 @@ function ModelField() {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        placeholder={DEFAULT_MODEL}
+        placeholder={fallback || "model id"}
         className="h-8 w-56 font-mono text-xs"
         spellCheck={false}
       />
-      {draft.trim() !== DEFAULT_MODEL && (
+      {fallback && draft.trim() !== fallback && (
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-muted-foreground"
-          title={`Reset to ${DEFAULT_MODEL}`}
+          title={`Reset to ${fallback}`}
           onClick={() => {
-            setDraft(DEFAULT_MODEL);
-            setModel(DEFAULT_MODEL);
+            setDraft(fallback);
+            setModel(provider, fallback);
           }}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
       )}
     </div>
+  );
+}
+
+/** Endpoint URL for local / custom OpenAI-compatible providers. */
+function BaseUrlField() {
+  const provider = useStudio((s) => s.provider);
+  const baseUrl = useStudio((s) => s.baseUrls[s.provider] ?? "");
+  const setBaseUrl = useStudio((s) => s.setBaseUrl);
+  const fallback = PROVIDER_META[provider].defaultBaseUrl ?? "";
+  const [draft, setDraft] = useState(baseUrl);
+  useEffect(() => setDraft(baseUrl), [baseUrl, provider]);
+
+  const commit = () => {
+    const next = draft.trim() || fallback;
+    setDraft(next);
+    if (next !== baseUrl) setBaseUrl(provider, next);
+  };
+
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      placeholder={fallback || "https://…/v1"}
+      className="h-8 w-64 font-mono text-xs"
+      spellCheck={false}
+    />
   );
 }
 
@@ -168,7 +251,15 @@ function ModelField() {
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { pageSize, setPageSize, advancedMode, setAdvancedMode, clearShellHistory, setSidebarWidth } =
     useSettings();
-  const { apiKey } = useStudio();
+  const provider = useStudio((s) => s.provider);
+  const ready = useStudio((s) => aiReady(s));
+  const refreshKeys = useStudio((s) => s.refreshKeys);
+  const meta = PROVIDER_META[provider];
+
+  // Key presence lives in the backend vault — refresh whenever settings open.
+  useEffect(() => {
+    if (open) void refreshKeys();
+  }, [open, refreshKeys]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -195,17 +286,22 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <TabsContent value="quick" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
             <SectionTitle>Essentials</SectionTitle>
             <div className="divide-y rounded-lg border bg-card px-4">
-              <div className="py-2.5">
-                <p className="mb-1.5 text-sm font-medium leading-tight">
-                  OpenAI API key
-                  {!apiKey && (
-                    <span className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                      required for Studio
-                    </span>
-                  )}
-                </p>
-                <ApiKeyField />
-              </div>
+              <Row label="AI provider" hint="Powers Studio and shell AI assist">
+                <ProviderSelect />
+              </Row>
+              {meta.needsKey && (
+                <div className="py-2.5">
+                  <p className="mb-1.5 text-sm font-medium leading-tight">
+                    {meta.label} API key
+                    {!ready && (
+                      <span className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                        required for Studio
+                      </span>
+                    )}
+                  </p>
+                  <ApiKeyField />
+                </div>
+              )}
               <Row label="AI mode" hint="Normal is fast · Deep Think reasons harder">
                 <AiModeSwitch compact />
               </Row>
@@ -246,17 +342,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
           {/* ── Prompts & AI ───────────────────────────────────────────── */}
           <TabsContent value="ai" className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
-            <SectionTitle>Provider — OpenAI</SectionTitle>
+            <SectionTitle>Provider</SectionTitle>
             <div className="divide-y rounded-lg border bg-card px-4">
-              <div className="py-2.5">
-                <p className="mb-1.5 text-sm font-medium leading-tight">API key</p>
-                <ApiKeyField />
-                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                  Stored locally on this machine and sent only to api.openai.com from the Ognom
-                  backend — never through the webview.
-                </p>
-              </div>
-              <Row label="Model" hint={`OpenAI model for Studio · default ${DEFAULT_MODEL}`}>
+              <Row label="Provider" hint="OpenAI, Anthropic, local (Ollama / LM Studio), or any OpenAI-compatible endpoint">
+                <ProviderSelect />
+              </Row>
+              {(meta.needsKey || provider === "custom") && (
+                <div className="py-2.5">
+                  <p className="mb-1.5 text-sm font-medium leading-tight">
+                    API key{provider === "custom" && " (optional)"}
+                  </p>
+                  <ApiKeyField />
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    Stored in Ognom&apos;s encrypted vault — the same AES-256-GCM protection as
+                    your database passwords. {meta.hint}
+                  </p>
+                </div>
+              )}
+              {PROVIDER_META[provider].defaultBaseUrl !== undefined && (
+                <Row label="Endpoint" hint="OpenAI-compatible /v1 base URL">
+                  <BaseUrlField />
+                </Row>
+              )}
+              <Row
+                label="Model"
+                hint={
+                  PROVIDER_META[provider].defaultModel
+                    ? `${meta.label} model for Studio · default ${PROVIDER_META[provider].defaultModel}`
+                    : `${meta.label} model id`
+                }
+              >
                 <ModelField />
               </Row>
               <Row
@@ -266,9 +381,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <AiModeSwitch />
               </Row>
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              More providers (Anthropic, local models, …) will appear here as separate sections.
-            </p>
+            {(provider === "ollama" || provider === "lmstudio") && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Local provider — prompts, schema samples, and results never leave this machine.
+              </p>
+            )}
 
             <SectionTitle>Query safety</SectionTitle>
             <div className="rounded-lg border bg-card px-4 py-2.5 text-xs leading-relaxed text-muted-foreground">

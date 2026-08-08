@@ -343,10 +343,35 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
                         {idx.hidden && <IdxBadge>hidden</IdxBadge>}
                         {idx.partialFilter && <IdxBadge>partial</IdxBadge>}
                         {idx.ttlSeconds != null && <IdxBadge>ttl {idx.ttlSeconds}s</IdxBadge>}
+                        {idx.usageOps === 0 && idx.name !== "_id_" && (
+                          <Badge
+                            variant="outline"
+                            className="border-warning/50 px-1.5 py-0 text-[10px] font-medium text-warning"
+                            title={
+                              idx.usageSince
+                                ? `No operations have used this index since ${new Date(idx.usageSince).toLocaleString()}`
+                                : "No operations have used this index since stats began"
+                            }
+                          >
+                            unused
+                          </Badge>
+                        )}
                       </div>
                       <p className="truncate font-mono text-xs text-muted-foreground">
                         {toShellText(idx.keys)}
                       </p>
+                      {idx.usageOps != null && idx.usageOps > 0 && (
+                        <p
+                          className="text-[10px] tabular-nums text-muted-foreground/70"
+                          title={
+                            idx.usageSince
+                              ? `Counting since ${new Date(idx.usageSince).toLocaleString()}`
+                              : undefined
+                          }
+                        >
+                          {idx.usageOps.toLocaleString()} op{idx.usageOps === 1 ? "" : "s"} served
+                        </p>
+                      )}
                     </div>
                     {idx.name !== "_id_" && (
                       <Button

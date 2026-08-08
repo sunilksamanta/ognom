@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  BarChart3,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -34,7 +35,7 @@ import { ExplainSheet, type ExplainRequest } from "@/components/explorer/Explain
 import { newStage, useExplorer, type Stage, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useMemo, useState } from "react";
-import type { Doc } from "@/lib/api";
+import { api, errMsg, type Doc, type StageStat } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STAGE_OPS = [
@@ -85,16 +86,41 @@ const SNIPPETS: Record<string, string> = {
   $unionWith: '{\n  coll: "otherCollection"\n}',
 };
 
+/** Per-stage profile row shown under a stage after "Stage stats" ran. */
+function StageStatBadge({ stat, prevDocs }: { stat: StageStat; prevDocs: number | null }) {
+  const stageMs = stat.cumulativeMs;
+  const drop =
+    prevDocs !== null && prevDocs > 0 && stat.docs <= prevDocs
+      ? Math.round(((prevDocs - stat.docs) / prevDocs) * 100)
+      : null;
+  return (
+    <div className="mx-2 mb-1.5 flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-[10px] tabular-nums text-muted-foreground">
+      <span className="font-medium text-foreground">{stat.docs.toLocaleString()}</span>
+      docs out
+      {drop !== null && drop > 0 && (
+        <span className={cn("rounded px-1 py-px font-medium", drop >= 90 ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>
+          −{drop}%
+        </span>
+      )}
+      <span className="ml-auto">{stageMs.toLocaleString()} ms cumulative</span>
+    </div>
+  );
+}
+
 function StageCard({
   tab,
   stage,
   index,
   total,
+  stat,
+  prevDocs,
 }: {
   tab: Tab;
   stage: Stage;
   index: number;
   total: number;
+  stat?: StageStat;
+  prevDocs: number | null;
 }) {
   const patchAgg = useExplorer((s) => s.patchAgg);
   const runAggregate = useExplorer((s) => s.runAggregate);
@@ -202,6 +228,7 @@ function StageCard({
           />
         </div>
       )}
+      {stat && <StageStatBadge stat={stat} prevDocs={prevDocs} />}
     </div>
   );
 }
@@ -216,6 +243,53 @@ export function AggregatePane({ tab }: { tab: Tab }) {
   const [explain, setExplain] = useState<ExplainRequest | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
   const a = tab.agg;
+
+  // ── Stage profiling: per-stage doc counts + timing ──────────────────────
+  // Stats are keyed to a signature of the enabled stages so edits after a
+  // run hide stale numbers instead of mislabeling them.
+  const [stats, setStats] = useState<{ sig: string; rows: StageStat[] } | null>(null);
+  const [profiling, setProfiling] = useState(false);
+
+  const pipelineSig = (stages: Stage[]) =>
+    JSON.stringify(stages.filter((s) => s.enabled).map((s) => [s.op, s.body]));
+
+  const runStageStats = async () => {
+    const enabled = a.stages.filter((s) => s.enabled);
+    if (enabled.length === 0) {
+      toast.error("Add at least one enabled stage");
+      return;
+    }
+    setProfiling(true);
+    try {
+      const rows = await api.aggregateStageStats(
+        tab.database,
+        tab.collection,
+        enabled.map((s) => ({ op: s.op, body: s.body })),
+        a.allowDiskUse
+      );
+      setStats({ sig: pipelineSig(a.stages), rows });
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setProfiling(false);
+    }
+  };
+
+  // Map enabled-stage order → stage id, valid only while the signature holds.
+  const statByStageId = useMemo(() => {
+    if (!stats || stats.sig !== pipelineSig(a.stages)) return {};
+    const map: Record<string, { stat: StageStat; prevDocs: number | null }> = {};
+    let i = 0;
+    let prev: number | null = null;
+    for (const s of a.stages) {
+      if (!s.enabled) continue;
+      const row = stats.rows[i++];
+      if (!row) break;
+      map[s.id] = { stat: row, prevDocs: prev };
+      prev = row.docs;
+    }
+    return map;
+  }, [stats, a.stages]);
 
   // Stable so the memoized ResultsViewer doesn't rebuild on stage-body edits.
   const docActions = useMemo(
@@ -299,7 +373,15 @@ export function AggregatePane({ tab }: { tab: Tab }) {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-2 p-3">
             {a.stages.map((stage, i) => (
-              <StageCard key={stage.id} tab={tab} stage={stage} index={i} total={a.stages.length} />
+              <StageCard
+                key={stage.id}
+                tab={tab}
+                stage={stage}
+                index={i}
+                total={a.stages.length}
+                stat={statByStageId[stage.id]?.stat}
+                prevDocs={statByStageId[stage.id]?.prevDocs ?? null}
+              />
             ))}
             <Button
               variant="outline"
@@ -315,20 +397,37 @@ export function AggregatePane({ tab }: { tab: Tab }) {
           </div>
         </div>
 
-        <div className="no-select flex shrink-0 items-center gap-3 border-t px-3 py-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="no-select flex shrink-0 items-center gap-2 border-t px-3 py-2">
+          <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
             <Checkbox
               checked={a.allowDiskUse}
               onCheckedChange={(v) => patchAgg(tab.id, { allowDiskUse: v === true })}
             />
-            Allow disk use
+            Disk use
           </label>
           <div className="flex-1" />
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={openExplain}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={profiling}
+                onClick={() => void runStageStats()}
+              >
+                {profiling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <BarChart3 className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Stage stats — doc counts, drop-off %, and timing per stage</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openExplain}>
                 <Gauge className="h-3.5 w-3.5" />
-                Explain
               </Button>
             </TooltipTrigger>
             <TooltipContent>Explain plan — index usage & timing</TooltipContent>
