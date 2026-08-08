@@ -8,6 +8,7 @@ import {
   Lock,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Star,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -19,6 +20,8 @@ import { openExternal, REPO_URL, REPO_LABEL, WEBSITE_URL, WEBSITE_LABEL } from "
 interface AboutDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Open the What's New slider (closes About first). */
+  onWhatsNew?: () => void;
 }
 
 function Prop({ icon: Icon, label }: { icon: typeof Feather; label: ReactNode }) {
@@ -30,7 +33,7 @@ function Prop({ icon: Icon, label }: { icon: typeof Feather; label: ReactNode })
   );
 }
 
-export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
+export function AboutDialog({ open, onOpenChange, onWhatsNew }: AboutDialogProps) {
   const [version, setVersion] = useState("");
 
   useEffect(() => {
@@ -120,15 +123,23 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
               <ExternalLink className="h-3 w-3" />
             </span>
           </button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5"
-            onClick={() => void checkForUpdates(true)}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Check for updates
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {onWhatsNew && (
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={onWhatsNew}>
+                <Sparkles className="h-3.5 w-3.5" />
+                What&apos;s new
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void checkForUpdates(true)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Check for updates
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

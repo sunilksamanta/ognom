@@ -149,6 +149,92 @@ export interface StageInput {
   body: string;
 }
 
+export interface CopyRequest {
+  /** Source workspace id; omit for the active workspace. */
+  sourceWorkspace?: string | null;
+  sourceDatabase: string;
+  sourceCollection: string;
+  targetWorkspace: string;
+  targetDatabase: string;
+  targetCollection: string;
+  /** mongosh-flavored filter; empty copies everything. */
+  filter: string;
+  copyIndexes: boolean;
+  /** Caller-chosen id used for `copy-progress` events and cancellation. */
+  jobId: string;
+}
+
+/** Payload of the `copy-progress` Tauri event. */
+export interface CopyProgress {
+  jobId: string;
+  copied: number;
+  /** Best-effort total; null means indeterminate. */
+  total?: number | null;
+}
+
+export interface CopyOutcome {
+  documents: number;
+  indexes: number;
+  canceled: boolean;
+  execMs: number;
+}
+
+export interface DiffRequest {
+  /** Source workspace id; omit for the active workspace. */
+  sourceWorkspace?: string | null;
+  sourceDatabase: string;
+  sourceCollection: string;
+  targetWorkspace: string;
+  targetDatabase: string;
+  targetCollection: string;
+  /** mongosh-flavored filter applied to both sides; empty diffs everything. */
+  filter: string;
+  /** Caller-chosen id used for `diff-progress` events and cancellation. */
+  jobId: string;
+}
+
+/** Payload of the `diff-progress` Tauri event. */
+export interface DiffProgress {
+  jobId: string;
+  /** "source" while scanning the source side, "target" for the reverse pass. */
+  phase: string;
+  processed: number;
+  total?: number | null;
+}
+
+export interface DiffEntry {
+  /** Document `_id` in extJSON form — pass back verbatim to syncDocuments. */
+  id: unknown;
+  source?: Doc | null;
+  target?: Doc | null;
+}
+
+export interface DiffOutcome {
+  identical: number;
+  changed: number;
+  onlyInSource: number;
+  onlyInTarget: number;
+  changedDocs: DiffEntry[];
+  onlyInSourceDocs: DiffEntry[];
+  onlyInTargetDocs: DiffEntry[];
+  /** A detail list hit its cap; the counts are still complete. */
+  truncated: boolean;
+  canceled: boolean;
+  execMs: number;
+}
+
+export interface SyncRequest {
+  sourceWorkspace?: string | null;
+  sourceDatabase: string;
+  sourceCollection: string;
+  targetWorkspace: string;
+  targetDatabase: string;
+  targetCollection: string;
+  /** "copy" upserts the source version onto the target; "delete" removes from the target. */
+  action: "copy" | "delete";
+  ids: unknown[];
+}
+
 export interface IndexInfo {
   name: string;
   keys: Doc;
@@ -157,6 +243,19 @@ export interface IndexInfo {
   hidden: boolean;
   ttlSeconds?: number | null;
   partialFilter?: Doc | null;
+  /** Operations served since the stats epoch; null when $indexStats is unavailable. */
+  usageOps?: number | null;
+  /** ISO timestamp the usage counter has been accumulating since. */
+  usageSince?: string | null;
+}
+
+/** One stage's profile from aggregate_stage_stats. */
+export interface StageStat {
+  op: string;
+  /** Documents flowing out of this stage. */
+  docs: number;
+  /** Wall time for the whole pipeline prefix ending at this stage. */
+  cumulativeMs: number;
 }
 
 export interface ExplainSummary {
@@ -167,6 +266,8 @@ export interface ExplainSummary {
   totalDocsExamined: number | null;
   totalKeysExamined: number | null;
   executionTimeMillis: number | null;
+  /** ESR-ordered index keys suggested when the plan is a collection scan. */
+  suggestedIndex?: Doc | null;
   raw: Doc;
 }
 
@@ -243,16 +344,36 @@ export const api = {
     invoke<ImportOutcome>("import_connections", { path, passphrase }),
   serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 
-  // metadata
-  listDatabases: () => invoke<DbInfo[]>("list_databases"),
-  listCollections: (database: string) => invoke<CollInfo[]>("list_collections", { database }),
+  // metadata — pass a workspace id to read a non-active open connection
+  listDatabases: (workspace?: string) => invoke<DbInfo[]>("list_databases", { workspace }),
+  listCollections: (database: string, workspace?: string) =>
+    invoke<CollInfo[]>("list_collections", { database, workspace }),
 
   // documents
   findDocuments: (req: FindRequest) => invoke<DocsPage>("find_documents", { req }),
   countDocuments: (database: string, collection: string, filter: string) =>
     invoke<CountResult>("count_documents", { database, collection, filter }),
-  aggregate: (database: string, collection: string, stages: StageInput[], allowDiskUse: boolean) =>
-    invoke<DocsPage>("aggregate_collection", { database, collection, stages, allowDiskUse }),
+  aggregate: (
+    database: string,
+    collection: string,
+    stages: StageInput[],
+    allowDiskUse: boolean,
+    readOnly?: boolean
+  ) =>
+    invoke<DocsPage>("aggregate_collection", {
+      database,
+      collection,
+      stages,
+      allowDiskUse,
+      readOnly,
+    }),
+  aggregateStageStats: (
+    database: string,
+    collection: string,
+    stages: StageInput[],
+    allowDiskUse: boolean
+  ) =>
+    invoke<StageStat[]>("aggregate_stage_stats", { database, collection, stages, allowDiskUse }),
   insertDocument: (database: string, collection: string, docText: string) =>
     invoke<{ insertedId: unknown }>("insert_document", { database, collection, docText }),
   replaceDocument: (database: string, collection: string, id: unknown, docText: string) =>
@@ -265,6 +386,16 @@ export const api = {
   deleteDocument: (database: string, collection: string, id: unknown) =>
     invoke<{ deleted: number }>("delete_document", { database, collection, id }),
 
+  bulkUpdate: (database: string, collection: string, filter: string, update: string) =>
+    invoke<{ matched: number; modified: number; execMs: number }>("bulk_update", {
+      database,
+      collection,
+      filter,
+      update,
+    }),
+  bulkDelete: (database: string, collection: string, filter: string) =>
+    invoke<{ deleted: number; execMs: number }>("bulk_delete", { database, collection, filter }),
+
   // collection operations
   dropCollection: (database: string, collection: string) =>
     invoke<void>("drop_collection", { database, collection }),
@@ -276,6 +407,10 @@ export const api = {
       source,
       target,
     }),
+  copyCollection: (req: CopyRequest) => invoke<CopyOutcome>("copy_collection", { req }),
+  diffCollections: (req: DiffRequest) => invoke<DiffOutcome>("diff_collections", { req }),
+  syncDocuments: (req: SyncRequest) => invoke<number>("sync_documents", { req }),
+  cancelJob: (jobId: string) => invoke<void>("cancel_job", { jobId }),
 
   // indexes & stats
   listIndexes: (database: string, collection: string) =>
@@ -316,23 +451,49 @@ export const api = {
     collection: string;
     filter: string;
     sort: string;
-    format: "json" | "csv";
+    format: "json" | "csv" | "ndjson" | "bson";
     path: string;
-  }) => invoke<number>("export_collection", args),
-  importDocuments: (database: string, collection: string, path: string) =>
-    invoke<number>("import_documents", { database, collection, path }),
+    /** Enables `copy-progress` events and cancellation via cancelJob. */
+    jobId?: string;
+  }) => invoke<CopyOutcome>("export_collection", args),
+  importDocuments: (database: string, collection: string, path: string, jobId?: string) =>
+    invoke<CopyOutcome>("import_documents", { database, collection, path, jobId }),
 
   // Ognom Studio
   saveFile: (path: string, contentsBase64: string) =>
     invoke<void>("save_file", { path, contentsBase64 }),
   aiChat: (args: {
-    apiKey: string;
+    provider: string;
     model: string;
     system: string;
     user: string;
     jsonMode: boolean;
     reasoning: boolean;
+    baseUrl?: string | null;
   }) => invoke<AiChatResult>("ai_chat", args),
+  /** Store (or clear, with "") a provider's key in the encrypted vault.
+   *  Returns the providers that currently have a key. */
+  setAiKey: (provider: string, key: string) =>
+    invoke<string[]>("set_ai_key", { provider, key }),
+  aiKeyStatus: () => invoke<string[]>("ai_key_status"),
+
+  // schema relations
+  dbRelations: (database: string) =>
+    invoke<{
+      nodes: { name: string; count: number; fields: string[] }[];
+      edges: { from: string; field: string; to: string }[];
+      truncated: boolean;
+    }>("db_relations", { database }),
+
+  // ops panel
+  currentOps: () => invoke<Doc[]>("current_ops"),
+  killOp: (opId: unknown) => invoke<void>("kill_op", { opId }),
+  profilerStatus: (database: string) => invoke<Doc>("profiler_status", { database }),
+  setProfiler: (database: string, level: number, slowMs?: number) =>
+    invoke<Doc>("set_profiler", { database, level, slowMs }),
+  profilerEntries: (database: string, limit?: number) =>
+    invoke<Doc[]>("profiler_entries", { database, limit }),
+  serverStatusLight: () => invoke<Doc>("server_status_light"),
 
   // shell
   runShell: (database: string, text: string) => invoke<ShellOutcome>("run_shell", { database, text }),

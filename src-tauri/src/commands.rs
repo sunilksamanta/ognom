@@ -4,8 +4,10 @@ use mongodb::options::{ClientOptions, IndexOptions};
 use mongodb::{Client, IndexModel};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::crypto::{Crypto, KeySource};
 use crate::error::{AppError, AppResult};
@@ -39,6 +41,9 @@ pub struct AppState {
     pub degraded: std::sync::atomic::AtomicBool,
     /// Monotonic id source for unsaved ("ad-hoc") connections.
     pub adhoc_seq: std::sync::atomic::AtomicU64,
+    /// Cancellation flags for in-flight long-running jobs (copies, diffs),
+    /// keyed by caller-chosen job id.
+    pub jobs: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl AppState {
@@ -88,6 +93,21 @@ async fn current_client(state: &State<'_, AppState>) -> AppResult<Client> {
         .get(id)
         .map(|c| c.client.clone())
         .ok_or(AppError::NotConnected)
+}
+
+/// Client of a specific open workspace, or the active one when `workspace`
+/// is `None`. Lets commands address any connection in the pool.
+async fn client_for(state: &State<'_, AppState>, workspace: Option<&str>) -> AppResult<Client> {
+    match workspace {
+        None => current_client(state).await,
+        Some(id) => {
+            let s = state.sessions.lock().await;
+            s.pool
+                .get(id)
+                .map(|c| c.client.clone())
+                .ok_or(AppError::NotConnected)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -466,8 +486,11 @@ pub struct CollInfo {
 }
 
 #[tauri::command]
-pub async fn list_databases(state: State<'_, AppState>) -> AppResult<Vec<DbInfo>> {
-    let client = current_client(&state).await?;
+pub async fn list_databases(
+    workspace: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<DbInfo>> {
+    let client = client_for(&state, workspace.as_deref()).await?;
     let specs = client.list_databases().await?;
     let mut dbs: Vec<DbInfo> = specs
         .into_iter()
@@ -478,8 +501,12 @@ pub async fn list_databases(state: State<'_, AppState>) -> AppResult<Vec<DbInfo>
 }
 
 #[tauri::command]
-pub async fn list_collections(database: String, state: State<'_, AppState>) -> AppResult<Vec<CollInfo>> {
-    let client = current_client(&state).await?;
+pub async fn list_collections(
+    database: String,
+    workspace: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<CollInfo>> {
+    let client = client_for(&state, workspace.as_deref()).await?;
     let specs: Vec<_> = client.database(&database).list_collections().await?.try_collect().await?;
     let mut colls: Vec<CollInfo> = specs
         .into_iter()
@@ -604,10 +631,26 @@ pub async fn aggregate_collection(
     collection: String,
     stages: Vec<StageInput>,
     allow_disk_use: bool,
+    read_only: Option<bool>,
     state: State<'_, AppState>,
 ) -> AppResult<DocsPage> {
     let client = current_client(&state).await?;
     let coll = client.database(&database).collection::<Document>(&collection);
+
+    // Hard gate for Studio: AI-generated pipelines must never write. Enforced
+    // here, not just in the prompt — a $out/$merge that slips past the model's
+    // instructions is rejected before it reaches the server.
+    if read_only.unwrap_or(false) {
+        for stage in &stages {
+            let op = stage.op.trim().to_lowercase();
+            if op == "$out" || op == "$merge" {
+                return Err(AppError::Other(format!(
+                    "blocked: {} writes data — Studio queries are read-only",
+                    stage.op
+                )));
+            }
+        }
+    }
 
     let mut pipeline: Vec<Document> = Vec::with_capacity(stages.len());
     for (i, stage) in stages.iter().enumerate() {
@@ -778,6 +821,952 @@ pub async fn duplicate_collection(
 }
 
 // ---------------------------------------------------------------------------
+// schema relations map
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationNode {
+    pub name: String,
+    pub count: u64,
+    pub fields: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationEdge {
+    pub from: String,
+    pub field: String,
+    pub to: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationReport {
+    pub nodes: Vec<RelationNode>,
+    pub edges: Vec<RelationEdge>,
+    /// True when the collection list was capped.
+    pub truncated: bool,
+}
+
+/// Candidate collection names a reference field could point at:
+/// "user" / "userId" / "user_id" → users, user; "category" → categories.
+fn reference_targets(field: &str) -> Vec<String> {
+    let base = field
+        .strip_suffix("_id")
+        .or_else(|| field.strip_suffix("Id"))
+        .or_else(|| field.strip_suffix("_ids"))
+        .or_else(|| field.strip_suffix("Ids"))
+        .unwrap_or(field)
+        .to_lowercase();
+    if base.is_empty() || base == "_" {
+        return Vec::new();
+    }
+    let mut out = vec![base.clone(), format!("{base}s"), format!("{base}es")];
+    if let Some(stem) = base.strip_suffix('y') {
+        out.push(format!("{stem}ies"));
+    }
+    out
+}
+
+/// Infer the database's entity graph: sample every collection, then link
+/// fields that (a) look like references by name (user / userId / user_id) and
+/// (b) hold ObjectId-ish values, to the collection their name points at.
+#[tauri::command]
+pub async fn db_relations(database: String, state: State<'_, AppState>) -> AppResult<RelationReport> {
+    const MAX_COLLECTIONS: usize = 30;
+    const SAMPLE: i64 = 50;
+
+    let client = current_client(&state).await?;
+    let db = client.database(&database);
+    let mut names: Vec<String> = db
+        .list_collection_names()
+        .await?
+        .into_iter()
+        .filter(|n| !n.starts_with("system."))
+        .collect();
+    names.sort();
+    let truncated = names.len() > MAX_COLLECTIONS;
+    names.truncate(MAX_COLLECTIONS);
+
+    let lower: std::collections::HashMap<String, String> =
+        names.iter().map(|n| (n.to_lowercase(), n.clone())).collect();
+
+    let mut nodes: Vec<RelationNode> = Vec::new();
+    let mut edges: Vec<RelationEdge> = Vec::new();
+
+    for name in &names {
+        let coll = db.collection::<Document>(name);
+        let count = coll.estimated_document_count().await.unwrap_or(0);
+        let docs: Vec<Document> = match coll
+            .aggregate(vec![doc! {"$sample": {"size": SAMPLE}}])
+            .await
+        {
+            Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
+            Err(_) => Vec::new(), // views can't $sample — node stays edge-less
+        };
+
+        let mut fields: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut ref_fields: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
+
+        for d in &docs {
+            for (k, v) in d {
+                if seen.insert(k.clone()) {
+                    fields.push(k.clone());
+                }
+                // Reference-shaped value? ObjectId, array of ObjectIds, or a
+                // 24-hex string (apps that store ids as strings).
+                let is_ref_value = match v {
+                    Bson::ObjectId(_) => true,
+                    Bson::String(s) => {
+                        s.len() == 24 && s.chars().all(|c| c.is_ascii_hexdigit())
+                    }
+                    Bson::Array(arr) => arr.iter().any(|e| matches!(e, Bson::ObjectId(_))),
+                    _ => false,
+                };
+                if is_ref_value && k != "_id" {
+                    ref_fields.entry(k.clone()).or_insert(true);
+                }
+            }
+        }
+
+        for field in ref_fields.keys() {
+            for target in reference_targets(field) {
+                if let Some(actual) = lower.get(&target) {
+                    if actual != name {
+                        edges.push(RelationEdge {
+                            from: name.clone(),
+                            field: field.clone(),
+                            to: actual.clone(),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        fields.truncate(40);
+        nodes.push(RelationNode { name: name.clone(), count, fields });
+    }
+
+    edges.sort_by(|a, b| (a.from.clone(), a.field.clone()).cmp(&(b.from.clone(), b.field.clone())));
+    edges.dedup_by(|a, b| a.from == b.from && a.field == b.field && a.to == b.to);
+
+    Ok(RelationReport { nodes, edges, truncated })
+}
+
+// ---------------------------------------------------------------------------
+// ops panel — currentOp / profiler / live server stats
+// ---------------------------------------------------------------------------
+
+/// In-flight operations via the `currentOp` admin command (idle connections
+/// and system operations excluded). Returns the raw op documents in relaxed
+/// extJSON; the UI picks the interesting fields.
+#[tauri::command]
+pub async fn current_ops(state: State<'_, AppState>) -> AppResult<Vec<Value>> {
+    let client = current_client(&state).await?;
+    let raw = client
+        .database("admin")
+        .run_command(doc! { "currentOp": 1, "active": true, "$all": false })
+        .await?;
+    let ops = raw
+        .get_array("inprog")
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|b| match b {
+                    Bson::Document(d) => Some(doc_to_value(d.clone())),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(ops)
+}
+
+/// Kill one in-flight operation. `op_id` is numeric on standalone/replica
+/// deployments and a string on sharded clusters — accept either.
+#[tauri::command]
+pub async fn kill_op(op_id: Value, state: State<'_, AppState>) -> AppResult<()> {
+    let client = current_client(&state).await?;
+    let op = to_bson(&op_id)?;
+    client
+        .database("admin")
+        .run_command(doc! { "killOp": 1, "op": op })
+        .await?;
+    Ok(())
+}
+
+/// Current profiler level + slowms threshold for a database.
+#[tauri::command]
+pub async fn profiler_status(database: String, state: State<'_, AppState>) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let raw = client
+        .database(&database)
+        .run_command(doc! { "profile": -1 })
+        .await?;
+    Ok(doc_to_value(raw))
+}
+
+/// Set the profiler level (0 off · 1 slow ops · 2 all ops) and optionally the
+/// slow-op threshold in milliseconds.
+#[tauri::command]
+pub async fn set_profiler(
+    database: String,
+    level: i32,
+    slow_ms: Option<i32>,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    if !(0..=2).contains(&level) {
+        return Err(AppError::Parse("profiler level must be 0, 1, or 2".into()));
+    }
+    let client = current_client(&state).await?;
+    let mut cmd = doc! { "profile": level };
+    if let Some(ms) = slow_ms {
+        cmd.insert("slowms", ms);
+    }
+    let raw = client.database(&database).run_command(cmd).await?;
+    Ok(doc_to_value(raw))
+}
+
+/// Most recent entries from `system.profile`, newest first.
+#[tauri::command]
+pub async fn profiler_entries(
+    database: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<Value>> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>("system.profile");
+    let docs: Vec<Document> = coll
+        .find(doc! {})
+        .sort(doc! { "ts": -1 })
+        .limit(limit.unwrap_or(50).clamp(1, 500))
+        .await?
+        .try_collect()
+        .await?;
+    Ok(docs.into_iter().map(doc_to_value).collect())
+}
+
+/// Light serverStatus slice for live polling: opcounters, connections,
+/// memory, network, uptime. Small on purpose — this gets called every
+/// couple of seconds while the Live tab is open.
+#[tauri::command]
+pub async fn server_status_light(state: State<'_, AppState>) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let raw = client
+        .database("admin")
+        .run_command(doc! { "serverStatus": 1 })
+        .await?;
+    let pick = |key: &str| raw.get(key).cloned().unwrap_or(Bson::Null);
+    let slim = doc! {
+        "uptime": pick("uptime"),
+        "opcounters": pick("opcounters"),
+        "connections": pick("connections"),
+        "mem": pick("mem"),
+        "network": pick("network"),
+        "version": pick("version"),
+    };
+    Ok(doc_to_value(slim))
+}
+
+// ---------------------------------------------------------------------------
+// bulk operations
+// ---------------------------------------------------------------------------
+
+/// Apply an operator update ({$set: …}, {$unset: …}, …) to every document
+/// matching the filter. Plain replacement documents are rejected — a bulk
+/// replace of N documents with the same body is almost never intended.
+#[tauri::command]
+pub async fn bulk_update(
+    database: String,
+    collection: String,
+    filter: String,
+    update: String,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+
+    let filter = parse_doc_text(&filter)?;
+    let update_doc = parse_doc_text(&update)?;
+    if update_doc.is_empty() {
+        return Err(AppError::Parse("update document is required, e.g. { $set: { field: 1 } }".into()));
+    }
+    if !update_doc.keys().all(|k| k.starts_with('$')) {
+        return Err(AppError::Parse(
+            "bulk update requires operator syntax ({ $set: … }, { $unset: … }, …)".into(),
+        ));
+    }
+
+    let started = Instant::now();
+    let result = coll.update_many(filter, update_doc).await?;
+    Ok(json!({
+        "matched": result.matched_count,
+        "modified": result.modified_count,
+        "execMs": started.elapsed().as_millis() as u64,
+    }))
+}
+
+/// Delete every document matching the filter. An empty filter is refused —
+/// "Clear collection" is the explicit tool for wiping everything.
+#[tauri::command]
+pub async fn bulk_delete(
+    database: String,
+    collection: String,
+    filter: String,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+
+    let filter = parse_doc_text(&filter)?;
+    if filter.is_empty() {
+        return Err(AppError::Parse(
+            "bulk delete needs a filter — use Clear Collection to remove every document".into(),
+        ));
+    }
+
+    let started = Instant::now();
+    let result = coll.delete_many(filter).await?;
+    Ok(json!({
+        "deleted": result.deleted_count,
+        "execMs": started.elapsed().as_millis() as u64,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// aggregation stage profiling
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StageStat {
+    pub op: String,
+    /// Documents flowing OUT of this stage (pipeline prefix + $count).
+    pub docs: u64,
+    /// Wall time for the whole prefix ending at this stage.
+    pub cumulative_ms: u64,
+}
+
+/// Profile a pipeline stage-by-stage: for each prefix run
+/// `[stage1..stageN, {$count}]` and report the surviving document count and
+/// cumulative time. This is how "stage 3 dropped 98% of the docs and took
+/// 2 s" gets surfaced in the builder. Write stages are refused — profiling
+/// must never mutate data.
+#[tauri::command]
+pub async fn aggregate_stage_stats(
+    database: String,
+    collection: String,
+    stages: Vec<StageInput>,
+    allow_disk_use: bool,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<StageStat>> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+
+    let mut pipeline: Vec<Document> = Vec::with_capacity(stages.len());
+    for (i, stage) in stages.iter().enumerate() {
+        let op = stage.op.trim();
+        if op.eq_ignore_ascii_case("$out") || op.eq_ignore_ascii_case("$merge") {
+            return Err(AppError::Other(
+                "stage profiling skips $out/$merge — remove the write stage to analyze".into(),
+            ));
+        }
+        let body = shell::parse_value(&stage.body)
+            .map_err(|e| AppError::Parse(format!("stage {} ({}): {e}", i + 1, stage.op)))?;
+        let mut d = Document::new();
+        d.insert(stage.op.clone(), to_bson(&body)?);
+        pipeline.push(d);
+    }
+    if pipeline.is_empty() {
+        return Err(AppError::Parse("add at least one enabled stage".into()));
+    }
+
+    let mut out: Vec<StageStat> = Vec::with_capacity(pipeline.len());
+    for i in 0..pipeline.len() {
+        let mut prefix: Vec<Document> = pipeline[..=i].to_vec();
+        prefix.push(doc! {"$count": "__n"});
+        let started = Instant::now();
+        let docs: Vec<Document> = coll
+            .aggregate(prefix)
+            .allow_disk_use(allow_disk_use)
+            .await?
+            .try_collect()
+            .await?;
+        let n = docs
+            .first()
+            .and_then(|d| d.get("__n"))
+            .and_then(|v| match v {
+                Bson::Int32(n) => Some(*n as u64),
+                Bson::Int64(n) => Some(*n as u64),
+                Bson::Double(n) => Some(*n as u64),
+                _ => None,
+            })
+            .unwrap_or(0);
+        out.push(StageStat {
+            op: stages[i].op.clone(),
+            docs: n,
+            cumulative_ms: started.elapsed().as_millis() as u64,
+        });
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// cross-connection collection copy
+// ---------------------------------------------------------------------------
+
+const COPY_BATCH: usize = 500;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyRequest {
+    /// Source workspace id (pool key). `None` means the active workspace.
+    pub source_workspace: Option<String>,
+    pub source_database: String,
+    pub source_collection: String,
+    /// Target workspace id — may equal the source for same-server copies.
+    pub target_workspace: String,
+    pub target_database: String,
+    pub target_collection: String,
+    /// mongosh-flavored filter; empty copies everything.
+    pub filter: String,
+    pub copy_indexes: bool,
+    /// Caller-chosen id used for progress events and cancellation.
+    pub job_id: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyProgress {
+    pub job_id: String,
+    pub copied: u64,
+    /// Best-effort total; `None` when counting was too slow or unavailable.
+    pub total: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyOutcome {
+    pub documents: u64,
+    pub indexes: u32,
+    pub canceled: bool,
+    pub exec_ms: u64,
+}
+
+/// Copy a collection between any two open workspaces (or within one), batched
+/// and streaming — documents round-trip through the app in chunks of
+/// [`COPY_BATCH`], never all at once. Emits `copy-progress` events and honors
+/// cancellation via [`cancel_job`]. Refuses to overwrite an existing target.
+#[tauri::command]
+pub async fn copy_collection(
+    req: CopyRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<CopyOutcome> {
+    let started = Instant::now();
+
+    let target_collection = req.target_collection.trim().to_string();
+    let target_database = req.target_database.trim().to_string();
+    if target_collection.is_empty() {
+        return Err(AppError::Parse("target collection name is required".into()));
+    }
+    if target_database.is_empty() {
+        return Err(AppError::Parse("target database name is required".into()));
+    }
+
+    let src_client = client_for(&state, req.source_workspace.as_deref()).await?;
+    let dst_client = client_for(&state, Some(&req.target_workspace)).await?;
+
+    // Copying a collection onto itself would read and write the same data.
+    let same_workspace = match &req.source_workspace {
+        Some(id) => *id == req.target_workspace,
+        // Source defaulted to the active workspace — resolve it to compare.
+        None => {
+            let s = state.sessions.lock().await;
+            s.active.as_deref() == Some(req.target_workspace.as_str())
+        }
+    };
+    if same_workspace
+        && req.source_database == target_database
+        && req.source_collection == target_collection
+    {
+        return Err(AppError::Other("source and target are the same collection".into()));
+    }
+
+    let filter = parse_doc_text(&req.filter)?;
+
+    let dst_db = dst_client.database(&target_database);
+    let existing: Vec<String> = dst_db.list_collection_names().await?;
+    if existing.iter().any(|n| *n == target_collection) {
+        return Err(AppError::Other(format!(
+            "collection '{target_collection}' already exists in '{target_database}' on the target"
+        )));
+    }
+
+    let src = src_client
+        .database(&req.source_database)
+        .collection::<Document>(&req.source_collection);
+    let dst = dst_db.collection::<Document>(&target_collection);
+
+    // Best-effort total for the progress bar: cheap estimate when unfiltered,
+    // time-boxed exact count otherwise. `None` just means an indeterminate bar.
+    let total: Option<u64> = if filter.is_empty() {
+        src.estimated_document_count().await.ok()
+    } else {
+        match tokio::time::timeout(COUNT_TIMEOUT, src.count_documents(filter.clone())).await {
+            Ok(Ok(n)) => Some(n),
+            _ => None,
+        }
+    };
+
+    // Register the cancel flag before the first read.
+    let cancel = Arc::new(AtomicBool::new(false));
+    state
+        .jobs
+        .lock()
+        .unwrap()
+        .insert(req.job_id.clone(), cancel.clone());
+
+    let result = run_copy(&app, &req.job_id, &src, &dst, filter, total, &cancel).await;
+
+    state.jobs.lock().unwrap().remove(&req.job_id);
+    let (documents, canceled) = result?;
+
+    // Recreate secondary indexes only after a complete, uncanceled copy.
+    let mut indexes = 0u32;
+    if req.copy_indexes && !canceled {
+        let models: Vec<IndexModel> = match src.list_indexes().await {
+            Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        for model in models {
+            let is_id = model
+                .options
+                .as_ref()
+                .and_then(|o| o.name.as_deref())
+                .map(|n| n == "_id_")
+                .unwrap_or(false);
+            if is_id {
+                continue;
+            }
+            dst.create_index(model).await?;
+            indexes += 1;
+        }
+    }
+
+    // An empty source never triggers an insert — make sure the target exists
+    // so the copy is visible in the target's collection list.
+    if documents == 0 && !canceled {
+        let after: Vec<String> = dst_db.list_collection_names().await?;
+        if !after.iter().any(|n| *n == target_collection) {
+            dst_db.create_collection(&target_collection).await?;
+        }
+    }
+
+    Ok(CopyOutcome {
+        documents,
+        indexes,
+        canceled,
+        exec_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// The streaming loop, separated so the caller can always unregister the job.
+async fn run_copy(
+    app: &AppHandle,
+    job_id: &str,
+    src: &mongodb::Collection<Document>,
+    dst: &mongodb::Collection<Document>,
+    filter: Document,
+    total: Option<u64>,
+    cancel: &AtomicBool,
+) -> AppResult<(u64, bool)> {
+    let mut cursor = src.find(filter).await?;
+    let mut batch: Vec<Document> = Vec::with_capacity(COPY_BATCH);
+    let mut copied: u64 = 0;
+    let mut canceled = false;
+
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            canceled = true;
+            break;
+        }
+        match cursor.try_next().await? {
+            Some(d) => {
+                batch.push(d);
+                if batch.len() >= COPY_BATCH {
+                    dst.insert_many(std::mem::take(&mut batch)).await?;
+                    copied += COPY_BATCH as u64;
+                    let _ = app.emit(
+                        "copy-progress",
+                        CopyProgress { job_id: job_id.to_string(), copied, total },
+                    );
+                }
+            }
+            None => break,
+        }
+    }
+    if !batch.is_empty() && !canceled {
+        copied += batch.len() as u64;
+        dst.insert_many(batch).await?;
+        let _ = app.emit(
+            "copy-progress",
+            CopyProgress { job_id: job_id.to_string(), copied, total },
+        );
+    }
+    Ok((copied, canceled))
+}
+
+/// Flag an in-flight job (copy, diff, …) for cancellation. The job stops at
+/// its next batch boundary; work already applied stays.
+#[tauri::command]
+pub async fn cancel_job(job_id: String, state: State<'_, AppState>) -> AppResult<()> {
+    if let Some(flag) = state.jobs.lock().unwrap().get(&job_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// collection diff & sync
+// ---------------------------------------------------------------------------
+
+const DIFF_BATCH: usize = 500;
+/// Per-category cap on returned document details. Counts keep going past it.
+const DIFF_DETAIL_CAP: usize = 200;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffRequest {
+    /// Source workspace id (pool key). `None` means the active workspace.
+    pub source_workspace: Option<String>,
+    pub source_database: String,
+    pub source_collection: String,
+    pub target_workspace: String,
+    pub target_database: String,
+    pub target_collection: String,
+    /// mongosh-flavored filter applied to both sides; empty diffs everything.
+    pub filter: String,
+    pub job_id: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffProgress {
+    pub job_id: String,
+    /// "source" while scanning the source side, "target" for the reverse pass.
+    pub phase: String,
+    pub processed: u64,
+    pub total: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffEntry {
+    pub id: Value,
+    pub source: Option<Value>,
+    pub target: Option<Value>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffOutcome {
+    pub identical: u64,
+    pub changed: u64,
+    pub only_in_source: u64,
+    pub only_in_target: u64,
+    /// Document details, each list capped at [`DIFF_DETAIL_CAP`].
+    pub changed_docs: Vec<DiffEntry>,
+    pub only_in_source_docs: Vec<DiffEntry>,
+    pub only_in_target_docs: Vec<DiffEntry>,
+    /// True when any detail list hit its cap (counts above are still complete).
+    pub truncated: bool,
+    pub canceled: bool,
+    pub exec_ms: u64,
+}
+
+/// Key a document id for in-memory matching. Canonical extJSON keeps full
+/// type fidelity, so ObjectId("x") never collides with the string "x".
+fn id_key(id: &Bson) -> String {
+    serde_json::to_string(&id.clone().into_canonical_extjson()).unwrap_or_default()
+}
+
+/// Compare two collections across any two open workspaces, matched by `_id`.
+/// Streams both sides in [`DIFF_BATCH`]-sized chunks (`$in` lookups against
+/// the other side), so memory stays flat regardless of collection size.
+/// Emits `diff-progress` events; honors [`cancel_job`].
+#[tauri::command]
+pub async fn diff_collections(
+    req: DiffRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<DiffOutcome> {
+    let started = Instant::now();
+
+    let src_client = client_for(&state, req.source_workspace.as_deref()).await?;
+    let dst_client = client_for(&state, Some(&req.target_workspace)).await?;
+    let filter = parse_doc_text(&req.filter)?;
+
+    let src = src_client
+        .database(&req.source_database)
+        .collection::<Document>(&req.source_collection);
+    let dst = dst_client
+        .database(&req.target_database)
+        .collection::<Document>(&req.target_collection);
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.jobs.lock().unwrap().insert(req.job_id.clone(), cancel.clone());
+    let result = run_diff(&app, &req.job_id, &src, &dst, filter, &cancel).await;
+    state.jobs.lock().unwrap().remove(&req.job_id);
+
+    let mut outcome = result?;
+    outcome.exec_ms = started.elapsed().as_millis() as u64;
+    Ok(outcome)
+}
+
+async fn run_diff(
+    app: &AppHandle,
+    job_id: &str,
+    src: &mongodb::Collection<Document>,
+    dst: &mongodb::Collection<Document>,
+    filter: Document,
+    cancel: &AtomicBool,
+) -> AppResult<DiffOutcome> {
+    let mut out = DiffOutcome {
+        identical: 0,
+        changed: 0,
+        only_in_source: 0,
+        only_in_target: 0,
+        changed_docs: Vec::new(),
+        only_in_source_docs: Vec::new(),
+        only_in_target_docs: Vec::new(),
+        truncated: false,
+        canceled: false,
+        exec_ms: 0,
+    };
+
+    let src_total = src.estimated_document_count().await.ok();
+    let dst_total = dst.estimated_document_count().await.ok();
+
+    let emit = |phase: &str, processed: u64, total: Option<u64>| {
+        let _ = app.emit(
+            "diff-progress",
+            DiffProgress {
+                job_id: job_id.to_string(),
+                phase: phase.to_string(),
+                processed,
+                total,
+            },
+        );
+    };
+
+    // Pass 1 — walk the source; look up each batch on the target by `_id`.
+    let mut cursor = src.find(filter.clone()).await?;
+    let mut batch: Vec<Document> = Vec::with_capacity(DIFF_BATCH);
+    let mut processed: u64 = 0;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            out.canceled = true;
+            return Ok(out);
+        }
+        let next = cursor.try_next().await?;
+        let flush = match &next {
+            Some(_) => batch.len() + 1 >= DIFF_BATCH,
+            None => !batch.is_empty(),
+        };
+        if let Some(d) = next {
+            batch.push(d);
+        } else if batch.is_empty() {
+            break;
+        }
+        if !flush {
+            continue;
+        }
+
+        let ids: Vec<Bson> = batch
+            .iter()
+            .filter_map(|d| d.get("_id").cloned())
+            .collect();
+        let found: Vec<Document> = dst
+            .find(doc! { "_id": { "$in": ids } })
+            .await?
+            .try_collect()
+            .await?;
+        let mut by_id: std::collections::HashMap<String, Document> = found
+            .into_iter()
+            .filter_map(|d| d.get("_id").cloned().map(|id| (id_key(&id), d)))
+            .collect();
+
+        for sdoc in std::mem::take(&mut batch) {
+            let Some(id) = sdoc.get("_id").cloned() else { continue };
+            match by_id.remove(&id_key(&id)) {
+                None => {
+                    out.only_in_source += 1;
+                    if out.only_in_source_docs.len() < DIFF_DETAIL_CAP {
+                        out.only_in_source_docs.push(DiffEntry {
+                            id: Bson::from(id).into_relaxed_extjson(),
+                            source: Some(doc_to_value(sdoc)),
+                            target: None,
+                        });
+                    } else {
+                        out.truncated = true;
+                    }
+                }
+                Some(tdoc) => {
+                    if sdoc == tdoc {
+                        out.identical += 1;
+                    } else {
+                        out.changed += 1;
+                        if out.changed_docs.len() < DIFF_DETAIL_CAP {
+                            out.changed_docs.push(DiffEntry {
+                                id: Bson::from(id).into_relaxed_extjson(),
+                                source: Some(doc_to_value(sdoc)),
+                                target: Some(doc_to_value(tdoc)),
+                            });
+                        } else {
+                            out.truncated = true;
+                        }
+                    }
+                }
+            }
+            processed += 1;
+        }
+        emit("source", processed, src_total);
+    }
+
+    // Pass 2 — walk the target; anything whose `_id` is absent on the source
+    // side is target-only. Changed/identical were already settled in pass 1.
+    let mut cursor = dst.find(filter).await?;
+    let mut batch: Vec<Document> = Vec::with_capacity(DIFF_BATCH);
+    let mut processed: u64 = 0;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            out.canceled = true;
+            return Ok(out);
+        }
+        let next = cursor.try_next().await?;
+        let flush = match &next {
+            Some(_) => batch.len() + 1 >= DIFF_BATCH,
+            None => !batch.is_empty(),
+        };
+        if let Some(d) = next {
+            batch.push(d);
+        } else if batch.is_empty() {
+            break;
+        }
+        if !flush {
+            continue;
+        }
+
+        let ids: Vec<Bson> = batch
+            .iter()
+            .filter_map(|d| d.get("_id").cloned())
+            .collect();
+        let found: Vec<Document> = src
+            .find(doc! { "_id": { "$in": ids } })
+            .projection(doc! { "_id": 1 })
+            .await?
+            .try_collect()
+            .await?;
+        let present: std::collections::HashSet<String> = found
+            .into_iter()
+            .filter_map(|d| d.get("_id").map(id_key))
+            .collect();
+
+        for tdoc in std::mem::take(&mut batch) {
+            let Some(id) = tdoc.get("_id").cloned() else { continue };
+            if !present.contains(&id_key(&id)) {
+                out.only_in_target += 1;
+                if out.only_in_target_docs.len() < DIFF_DETAIL_CAP {
+                    out.only_in_target_docs.push(DiffEntry {
+                        id: Bson::from(id).into_relaxed_extjson(),
+                        source: None,
+                        target: Some(doc_to_value(tdoc)),
+                    });
+                } else {
+                    out.truncated = true;
+                }
+            }
+            processed += 1;
+        }
+        emit("target", processed, dst_total);
+    }
+
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRequest {
+    pub source_workspace: Option<String>,
+    pub source_database: String,
+    pub source_collection: String,
+    pub target_workspace: String,
+    pub target_database: String,
+    pub target_collection: String,
+    /// "copy" upserts the source version of each id onto the target (covers
+    /// both missing and changed documents); "delete" removes the ids from the
+    /// target.
+    pub action: String,
+    /// Document `_id`s in extJSON form, as returned by [`diff_collections`].
+    pub ids: Vec<Value>,
+}
+
+/// Apply a diff resolution to the target collection. Batched; returns how many
+/// documents were written or removed.
+#[tauri::command]
+pub async fn sync_documents(req: SyncRequest, state: State<'_, AppState>) -> AppResult<u64> {
+    let src_client = client_for(&state, req.source_workspace.as_deref()).await?;
+    let dst_client = client_for(&state, Some(&req.target_workspace)).await?;
+    let src = src_client
+        .database(&req.source_database)
+        .collection::<Document>(&req.source_collection);
+    let dst = dst_client
+        .database(&req.target_database)
+        .collection::<Document>(&req.target_collection);
+
+    let ids: Vec<Bson> = req.ids.iter().map(to_bson).collect::<AppResult<_>>()?;
+    let mut applied: u64 = 0;
+
+    match req.action.as_str() {
+        "copy" => {
+            for chunk in ids.chunks(DIFF_BATCH) {
+                let docs: Vec<Document> = src
+                    .find(doc! { "_id": { "$in": chunk.to_vec() } })
+                    .await?
+                    .try_collect()
+                    .await?;
+                for d in docs {
+                    let Some(id) = d.get("_id").cloned() else { continue };
+                    let r = dst
+                        .replace_one(doc! { "_id": id }, d)
+                        .upsert(true)
+                        .await?;
+                    applied += if r.modified_count > 0 || r.upserted_id.is_some() {
+                        1
+                    } else {
+                        // Matched but unmodified — already in sync; count it.
+                        r.matched_count
+                    };
+                }
+            }
+        }
+        "delete" => {
+            for chunk in ids.chunks(DIFF_BATCH) {
+                let r = dst.delete_many(doc! { "_id": { "$in": chunk.to_vec() } }).await?;
+                applied += r.deleted_count;
+            }
+        }
+        other => return Err(AppError::Parse(format!("unknown sync action '{other}'"))),
+    }
+
+    Ok(applied)
+}
+
+// ---------------------------------------------------------------------------
 // indexes & stats
 // ---------------------------------------------------------------------------
 
@@ -791,6 +1780,11 @@ pub struct IndexInfo {
     pub hidden: bool,
     pub ttl_seconds: Option<u64>,
     pub partial_filter: Option<Value>,
+    /// Operations served since the stats epoch ($indexStats); `None` when
+    /// usage stats are unavailable (views, older servers, permissions).
+    pub usage_ops: Option<i64>,
+    /// ISO timestamp the usage counter has been accumulating since.
+    pub usage_since: Option<String>,
 }
 
 #[tauri::command]
@@ -802,18 +1796,49 @@ pub async fn list_indexes(
     let client = current_client(&state).await?;
     let coll = client.database(&database).collection::<Document>(&collection);
     let models: Vec<IndexModel> = coll.list_indexes().await?.try_collect().await?;
+
+    // Usage stats power "unused index" detection. Best-effort: $indexStats is
+    // unavailable on views and restricted deployments — degrade to None.
+    let mut usage: std::collections::HashMap<String, (i64, Option<String>)> =
+        std::collections::HashMap::new();
+    if let Ok(cursor) = coll.aggregate(vec![doc! {"$indexStats": {}}]).await {
+        let stats: Vec<Document> = cursor.try_collect().await.unwrap_or_default();
+        for s in stats {
+            let Some(name) = s.get_str("name").ok() else { continue };
+            let ops = s
+                .get_document("accesses")
+                .ok()
+                .and_then(|a| {
+                    a.get_i64("ops")
+                        .ok()
+                        .or_else(|| a.get_i32("ops").ok().map(i64::from))
+                })
+                .unwrap_or(0);
+            let since = s
+                .get_document("accesses")
+                .ok()
+                .and_then(|a| a.get_datetime("since").ok())
+                .map(|d| d.try_to_rfc3339_string().unwrap_or_default());
+            usage.insert(name.to_string(), (ops, since));
+        }
+    }
+
     Ok(models
         .into_iter()
         .map(|m| {
             let o = m.options.unwrap_or_default();
+            let name = o.name.unwrap_or_default();
+            let u = usage.get(&name);
             IndexInfo {
-                name: o.name.unwrap_or_default(),
                 keys: doc_to_value(m.keys),
                 unique: o.unique.unwrap_or(false),
                 sparse: o.sparse.unwrap_or(false),
                 hidden: o.hidden.unwrap_or(false),
                 ttl_seconds: o.expire_after.map(|d| d.as_secs()),
                 partial_filter: o.partial_filter_expression.map(doc_to_value),
+                usage_ops: u.map(|(ops, _)| *ops),
+                usage_since: u.and_then(|(_, since)| since.clone()),
+                name,
             }
         })
         .collect())
@@ -942,6 +1967,10 @@ pub async fn explain_query(
     let db = client.database(&database);
     let verbosity = verbosity.unwrap_or_else(|| "executionStats".into());
 
+    // Filter/sort shapes are kept around to derive an index suggestion when
+    // the plan turns out to be a collection scan.
+    let (shape_filter, shape_sort);
+
     let explain = if let Some(stages) = pipeline_stages {
         let mut pipeline: Vec<Document> = Vec::with_capacity(stages.len());
         for (i, stage) in stages.iter().enumerate() {
@@ -951,6 +1980,18 @@ pub async fn explain_query(
             d.insert(stage.op.clone(), to_bson(&body)?);
             pipeline.push(d);
         }
+        // Only a leading $match (and the first $sort) can be served by an
+        // index, so that's the shape the suggestion is derived from.
+        shape_filter = pipeline
+            .first()
+            .and_then(|d| d.get_document("$match").ok())
+            .cloned()
+            .unwrap_or_default();
+        shape_sort = pipeline
+            .iter()
+            .find_map(|d| d.get_document("$sort").ok())
+            .cloned()
+            .unwrap_or_default();
         doc! {
             "explain": {
                 "aggregate": &collection,
@@ -960,20 +2001,69 @@ pub async fn explain_query(
             "verbosity": &verbosity,
         }
     } else {
-        let mut find_cmd = doc! { "find": &collection, "filter": parse_doc_text(&filter)? };
-        let sort = parse_doc_text(&sort)?;
+        let filter_doc = parse_doc_text(&filter)?;
+        let sort_doc = parse_doc_text(&sort)?;
         let projection = parse_doc_text(&projection)?;
-        if !sort.is_empty() {
-            find_cmd.insert("sort", sort);
+        let mut find_cmd = doc! { "find": &collection, "filter": filter_doc.clone() };
+        if !sort_doc.is_empty() {
+            find_cmd.insert("sort", sort_doc.clone());
         }
         if !projection.is_empty() {
             find_cmd.insert("projection", projection);
         }
+        shape_filter = filter_doc;
+        shape_sort = sort_doc;
         doc! { "explain": find_cmd, "verbosity": &verbosity }
     };
 
     let raw = db.run_command(explain).await?;
-    Ok(doc_to_value(summarize_explain(&raw)))
+    let mut summary = summarize_explain(&raw);
+    if summary.get_bool("isCollectionScan").unwrap_or(false) {
+        if let Some(idx) = suggest_index(&shape_filter, &shape_sort) {
+            summary.insert("suggestedIndex", idx);
+        }
+    }
+    Ok(doc_to_value(summary))
+}
+
+/// Derive an index key doc from a query shape using the classic
+/// Equality → Sort → Range field ordering. Returns `None` when nothing
+/// indexable is in the shape (e.g. only `$expr`/`$or` operators).
+fn suggest_index(filter: &Document, sort: &Document) -> Option<Document> {
+    let mut equality: Vec<String> = Vec::new();
+    let mut range: Vec<String> = Vec::new();
+    for (k, v) in filter {
+        if k.starts_with('$') {
+            continue; // $or / $and / $expr — too shape-dependent to suggest from
+        }
+        let is_range =
+            matches!(v, Bson::Document(d) if d.keys().any(|op| op.starts_with('$')));
+        if is_range {
+            range.push(k.clone());
+        } else {
+            equality.push(k.clone());
+        }
+    }
+
+    let mut idx = Document::new();
+    for k in equality {
+        idx.insert(k, 1i32);
+    }
+    for (k, dir) in sort {
+        if !idx.contains_key(k) {
+            idx.insert(k.clone(), dir.clone());
+        }
+    }
+    for k in range {
+        if !idx.contains_key(&k) {
+            idx.insert(k, 1i32);
+        }
+    }
+    if idx.is_empty() {
+        None
+    } else {
+        Some(idx)
+    }
 }
 
 /// Pull the headline numbers out of a (possibly nested / sharded) explain plan.
@@ -1182,61 +2272,195 @@ pub async fn export_collection(
     sort: String,
     format: String,
     path: String,
+    job_id: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
-) -> AppResult<u64> {
+) -> AppResult<CopyOutcome> {
     use std::io::Write;
 
+    let started = Instant::now();
     let client = current_client(&state).await?;
     let coll = client.database(&database).collection::<Document>(&collection);
     let filter = parse_doc_text(&filter)?;
     let sort = parse_doc_text(&sort)?;
 
+    let total: Option<u64> = if filter.is_empty() {
+        coll.estimated_document_count().await.ok()
+    } else {
+        match tokio::time::timeout(COUNT_TIMEOUT, coll.count_documents(filter.clone())).await {
+            Ok(Ok(n)) => Some(n),
+            _ => None,
+        }
+    };
+
     let mut find = coll.find(filter);
     if !sort.is_empty() {
         find = find.sort(sort);
     }
-    let docs: Vec<Document> = find.await?.try_collect().await?;
+    let mut cursor = find.await?;
 
     let file = std::fs::File::create(&path)
         .map_err(|e| AppError::Parse(format!("cannot write {path}: {e}")))?;
     let mut w = std::io::BufWriter::new(file);
-    let count = docs.len() as u64;
 
-    if format == "csv" {
-        // Union of top-level keys across all docs, _id first.
-        let mut cols: Vec<String> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        if docs.iter().any(|d| d.contains_key("_id")) {
-            cols.push("_id".into());
-            seen.insert("_id".to_string());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let job = job_id.unwrap_or_default();
+    if !job.is_empty() {
+        state.jobs.lock().unwrap().insert(job.clone(), cancel.clone());
+    }
+    let emit = |copied: u64| {
+        if !job.is_empty() {
+            let _ = app.emit(
+                "copy-progress",
+                CopyProgress { job_id: job.clone(), copied, total },
+            );
         }
-        for d in &docs {
-            for k in d.keys() {
-                if seen.insert(k.clone()) {
-                    cols.push(k.clone());
+    };
+
+    // CSV needs a column set before the first row. Buffer an initial window to
+    // discover the key union, then stream the rest against those columns —
+    // memory stays flat no matter how large the collection is.
+    let mut count: u64 = 0;
+    let mut canceled = false;
+    let result: AppResult<()> = async {
+        match format.as_str() {
+            "csv" => {
+                const SNIFF: usize = 1000;
+                let mut head: Vec<Document> = Vec::with_capacity(SNIFF);
+                while head.len() < SNIFF {
+                    match cursor.try_next().await? {
+                        Some(d) => head.push(d),
+                        None => break,
+                    }
+                }
+                let mut cols: Vec<String> = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                if head.iter().any(|d| d.contains_key("_id")) {
+                    cols.push("_id".into());
+                    seen.insert("_id".to_string());
+                }
+                for d in &head {
+                    for k in d.keys() {
+                        if seen.insert(k.clone()) {
+                            cols.push(k.clone());
+                        }
+                    }
+                }
+                writeln!(w, "{}", cols.iter().map(|c| csv_escape(c)).collect::<Vec<_>>().join(","))?;
+                let write_row = |d: &Document, w: &mut dyn Write| -> AppResult<()> {
+                    let row: Vec<String> = cols
+                        .iter()
+                        .map(|c| match d.get(c) {
+                            Some(b) => csv_escape(&bson_to_cell(b)),
+                            None => String::new(),
+                        })
+                        .collect();
+                    writeln!(w, "{}", row.join(","))?;
+                    Ok(())
+                };
+                for d in &head {
+                    write_row(d, &mut w)?;
+                    count += 1;
+                }
+                emit(count);
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    match cursor.try_next().await? {
+                        Some(d) => {
+                            write_row(&d, &mut w)?;
+                            count += 1;
+                            if count % 500 == 0 {
+                                emit(count);
+                            }
+                        }
+                        None => break,
+                    }
                 }
             }
+            "bson" => {
+                // mongodump-compatible: raw BSON documents, concatenated.
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    match cursor.try_next().await? {
+                        Some(d) => {
+                            d.to_writer(&mut w)
+                                .map_err(|e| AppError::Parse(format!("bson write: {e}")))?;
+                            count += 1;
+                            if count % 500 == 0 {
+                                emit(count);
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+            "ndjson" => {
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    match cursor.try_next().await? {
+                        Some(d) => {
+                            writeln!(w, "{}", doc_to_value(d))?;
+                            count += 1;
+                            if count % 500 == 0 {
+                                emit(count);
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+            _ => {
+                // JSON array of relaxed extended JSON, streamed one doc per line.
+                w.write_all(b"[\n")?;
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    match cursor.try_next().await? {
+                        Some(d) => {
+                            if count > 0 {
+                                w.write_all(b",\n")?;
+                            }
+                            let json = serde_json::to_string_pretty(&doc_to_value(d))
+                                .map_err(|e| AppError::Parse(format!("serialize failed: {e}")))?;
+                            w.write_all(json.as_bytes())?;
+                            count += 1;
+                            if count % 500 == 0 {
+                                emit(count);
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                w.write_all(b"\n]")?;
+            }
         }
-        writeln!(w, "{}", cols.iter().map(|c| csv_escape(c)).collect::<Vec<_>>().join(","))?;
-        for d in &docs {
-            let row: Vec<String> = cols
-                .iter()
-                .map(|c| match d.get(c) {
-                    Some(b) => csv_escape(&bson_to_cell(b)),
-                    None => String::new(),
-                })
-                .collect();
-            writeln!(w, "{}", row.join(","))?;
-        }
-    } else {
-        // Pretty JSON array of relaxed extended JSON.
-        let arr: Vec<Value> = docs.into_iter().map(doc_to_value).collect();
-        let json = serde_json::to_string_pretty(&arr)
-            .map_err(|e| AppError::Parse(format!("serialize failed: {e}")))?;
-        w.write_all(json.as_bytes())?;
+        w.flush()?;
+        Ok(())
     }
-    w.flush()?;
-    Ok(count)
+    .await;
+
+    if !job.is_empty() {
+        state.jobs.lock().unwrap().remove(&job);
+    }
+    result?;
+    emit(count);
+    Ok(CopyOutcome {
+        documents: count,
+        indexes: 0,
+        canceled,
+        exec_ms: started.elapsed().as_millis() as u64,
+    })
 }
 
 fn csv_escape(s: &str) -> String {
@@ -1268,38 +2492,280 @@ pub async fn import_documents(
     database: String,
     collection: String,
     path: String,
+    job_id: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
-) -> AppResult<u64> {
+) -> AppResult<CopyOutcome> {
+    let started = Instant::now();
     let client = current_client(&state).await?;
     let coll = client.database(&database).collection::<Document>(&collection);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
 
-    // Accept either a JSON array or newline-delimited JSON (NDJSON).
-    let trimmed = text.trim_start();
-    let mut docs: Vec<Document> = Vec::new();
-    if trimmed.starts_with('[') {
-        let value = shell::parse_value(&text)?;
-        for v in value.as_array().ok_or_else(|| AppError::Parse("expected a JSON array".into()))? {
-            docs.push(to_doc(v)?);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let job = job_id.unwrap_or_default();
+    if !job.is_empty() {
+        state.jobs.lock().unwrap().insert(job.clone(), cancel.clone());
+    }
+
+    let result = run_import(&app, &job, &coll, &path, &cancel).await;
+
+    if !job.is_empty() {
+        state.jobs.lock().unwrap().remove(&job);
+    }
+    let (count, canceled) = result?;
+    Ok(CopyOutcome {
+        documents: count,
+        indexes: 0,
+        canceled,
+        exec_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+const IMPORT_BATCH: usize = 1000;
+
+async fn run_import(
+    app: &AppHandle,
+    job: &str,
+    coll: &mongodb::Collection<Document>,
+    path: &str,
+    cancel: &AtomicBool,
+) -> AppResult<(u64, bool)> {
+    use std::io::{BufRead, Read};
+
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let mut count: u64 = 0;
+    let mut canceled = false;
+    let mut batch: Vec<Document> = Vec::with_capacity(IMPORT_BATCH);
+
+    let emit = |copied: u64| {
+        if !job.is_empty() {
+            let _ = app.emit(
+                "copy-progress",
+                CopyProgress { job_id: job.to_string(), copied, total: None },
+            );
         }
-    } else {
-        for (i, line) in text.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
+    };
+
+    macro_rules! flush {
+        () => {
+            if !batch.is_empty() {
+                let n = batch.len() as u64;
+                coll.insert_many(std::mem::take(&mut batch)).await?;
+                count += n;
+                emit(count);
             }
-            let v = shell::parse_value(line)
-                .map_err(|e| AppError::Parse(format!("line {}: {e}", i + 1)))?;
-            docs.push(to_doc(&v)?);
+        };
+    }
+
+    match ext.as_str() {
+        "bson" => {
+            // mongodump format: length-prefixed BSON documents, concatenated.
+            let file = std::fs::File::open(path)
+                .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
+            let mut r = std::io::BufReader::new(file);
+            loop {
+                if cancel.load(Ordering::Relaxed) {
+                    canceled = true;
+                    break;
+                }
+                // Peek: EOF means done; anything else must parse as a doc.
+                let mut probe = [0u8; 1];
+                match r.read(&mut probe) {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(e) => return Err(AppError::Parse(format!("bson read: {e}"))),
+                }
+                let chained = probe.as_slice().chain(&mut r);
+                let d = Document::from_reader(chained)
+                    .map_err(|e| AppError::Parse(format!("bson document {}: {e}", count + 1)))?;
+                batch.push(d);
+                if batch.len() >= IMPORT_BATCH {
+                    flush!();
+                }
+            }
+            flush!();
+        }
+        "csv" => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
+            let rows = parse_csv(&text)?;
+            let mut iter = rows.into_iter();
+            let header = iter
+                .next()
+                .ok_or_else(|| AppError::Parse("CSV file is empty".into()))?;
+            for row in iter {
+                if cancel.load(Ordering::Relaxed) {
+                    canceled = true;
+                    break;
+                }
+                if row.iter().all(|c| c.is_empty()) {
+                    continue;
+                }
+                let mut d = Document::new();
+                for (i, cell) in row.iter().enumerate() {
+                    let Some(key) = header.get(i) else { continue };
+                    if key.is_empty() || cell.is_empty() {
+                        continue; // empty cell → field absent, like mongoimport
+                    }
+                    d.insert(key.clone(), csv_cell_to_bson(key, cell));
+                }
+                if !d.is_empty() {
+                    batch.push(d);
+                }
+                if batch.len() >= IMPORT_BATCH {
+                    flush!();
+                }
+            }
+            flush!();
+        }
+        "ndjson" | "jsonl" => {
+            // Line-streamed: constant memory regardless of file size.
+            let file = std::fs::File::open(path)
+                .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
+            let r = std::io::BufReader::new(file);
+            for (i, line) in r.lines().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    canceled = true;
+                    break;
+                }
+                let line = line.map_err(|e| AppError::Parse(format!("line {}: {e}", i + 1)))?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let v = shell::parse_value(&line)
+                    .map_err(|e| AppError::Parse(format!("line {}: {e}", i + 1)))?;
+                batch.push(to_doc(&v)?);
+                if batch.len() >= IMPORT_BATCH {
+                    flush!();
+                }
+            }
+            flush!();
+        }
+        _ => {
+            // .json — array or NDJSON body, sniffed like before. The array
+            // form needs a full parse; NDJSON content streams line-by-line.
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
+            if text.trim_start().starts_with('[') {
+                let value = shell::parse_value(&text)?;
+                for v in value
+                    .as_array()
+                    .ok_or_else(|| AppError::Parse("expected a JSON array".into()))?
+                {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    batch.push(to_doc(v)?);
+                    if batch.len() >= IMPORT_BATCH {
+                        flush!();
+                    }
+                }
+            } else {
+                for (i, line) in text.lines().enumerate() {
+                    if cancel.load(Ordering::Relaxed) {
+                        canceled = true;
+                        break;
+                    }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let v = shell::parse_value(line)
+                        .map_err(|e| AppError::Parse(format!("line {}: {e}", i + 1)))?;
+                    batch.push(to_doc(&v)?);
+                    if batch.len() >= IMPORT_BATCH {
+                        flush!();
+                    }
+                }
+            }
+            flush!();
         }
     }
 
-    if docs.is_empty() {
+    if count == 0 && !canceled {
         return Err(AppError::Parse("no documents found in file".into()));
     }
-    let n = docs.len() as u64;
-    coll.insert_many(docs).await?;
-    Ok(n)
+    Ok((count, canceled))
+}
+
+/// Minimal RFC-4180 CSV parser: quoted fields, escaped quotes, newlines
+/// inside quotes. Returns rows of cells.
+fn parse_csv(text: &str) -> AppResult<Vec<Vec<String>>> {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    let mut cell = String::new();
+    let mut in_quotes = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            match c {
+                '"' => {
+                    if chars.peek() == Some(&'"') {
+                        chars.next();
+                        cell.push('"');
+                    } else {
+                        in_quotes = false;
+                    }
+                }
+                _ => cell.push(c),
+            }
+        } else {
+            match c {
+                '"' => in_quotes = true,
+                ',' => {
+                    row.push(std::mem::take(&mut cell));
+                }
+                '\r' => {} // swallow; the \n handles the row break
+                '\n' => {
+                    row.push(std::mem::take(&mut cell));
+                    rows.push(std::mem::take(&mut row));
+                }
+                _ => cell.push(c),
+            }
+        }
+    }
+    if !cell.is_empty() || !row.is_empty() {
+        row.push(cell);
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+/// Type inference for CSV cells, mongoimport-style: bool, int, double, and a
+/// 24-hex `_id` becomes an ObjectId; everything else stays a string.
+fn csv_cell_to_bson(key: &str, cell: &str) -> Bson {
+    if key == "_id" && cell.len() == 24 && cell.chars().all(|c| c.is_ascii_hexdigit()) {
+        if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(cell) {
+            return Bson::ObjectId(oid);
+        }
+    }
+    match cell {
+        "true" => return Bson::Boolean(true),
+        "false" => return Bson::Boolean(false),
+        "null" => return Bson::Null,
+        _ => {}
+    }
+    if let Ok(n) = cell.parse::<i64>() {
+        // Preserve leading-zero strings like "007" as strings.
+        if !(cell.len() > 1 && cell.starts_with('0')) {
+            return if let Ok(n32) = i32::try_from(n) {
+                Bson::Int32(n32)
+            } else {
+                Bson::Int64(n)
+            };
+        }
+    }
+    if let Ok(f) = cell.parse::<f64>() {
+        if cell.contains('.') || cell.contains('e') || cell.contains('E') {
+            return Bson::Double(f);
+        }
+    }
+    Bson::String(cell.to_string())
 }
 
 /// Write arbitrary (base64-encoded) bytes to a user-chosen path. Used by
@@ -1327,21 +2793,115 @@ pub struct AiChatResult {
     pub total_tokens: u64,
 }
 
-/// Proxy a chat completion to OpenAI from the backend (no CORS, key stays
-/// out of the webview's network layer). Returns the assistant message text
-/// plus token usage so the UI can surface how much was spent.
+const AI_PROVIDERS: &[&str] = &["openai", "anthropic", "ollama", "lmstudio", "custom"];
+
+fn ai_keys_path(state: &AppState) -> std::path::PathBuf {
+    state.data_dir.join("ai_keys.json")
+}
+
+/// provider → encrypted key payload. Same AES-256-GCM vault as connection
+/// secrets, so an AI key is protected exactly like a database password.
+fn load_ai_keys(state: &AppState) -> std::collections::HashMap<String, String> {
+    std::fs::read_to_string(ai_keys_path(state))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn stored_ai_key(state: &AppState, provider: &str) -> Option<String> {
+    let keys = load_ai_keys(state);
+    let payload = keys.get(provider)?;
+    state.crypto().decrypt(payload).ok().filter(|k| !k.trim().is_empty())
+}
+
+/// Store (or clear, with an empty key) a provider's API key in the encrypted
+/// vault. Returns the providers that currently have a key.
+#[tauri::command]
+pub fn set_ai_key(
+    provider: String,
+    key: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<String>> {
+    if !AI_PROVIDERS.contains(&provider.as_str()) {
+        return Err(AppError::Parse(format!("unknown AI provider '{provider}'")));
+    }
+    let mut keys = load_ai_keys(&state);
+    let key = key.trim();
+    if key.is_empty() {
+        keys.remove(&provider);
+    } else {
+        keys.insert(provider, state.crypto().encrypt(key)?);
+    }
+    let json = serde_json::to_string_pretty(&keys)
+        .map_err(|e| AppError::Storage(format!("could not serialize AI keys: {e}")))?;
+    std::fs::write(ai_keys_path(&state), json)
+        .map_err(|e| AppError::Storage(format!("could not write AI keys: {e}")))?;
+    let mut have: Vec<String> = keys.into_keys().collect();
+    have.sort();
+    Ok(have)
+}
+
+/// Which providers have a key stored. The key itself never leaves the backend.
+#[tauri::command]
+pub fn ai_key_status(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let mut have: Vec<String> = load_ai_keys(&state).into_keys().collect();
+    have.sort();
+    Ok(have)
+}
+
+fn provider_label(provider: &str) -> &'static str {
+    match provider {
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "ollama" => "Ollama",
+        "lmstudio" => "LM Studio",
+        _ => "AI provider",
+    }
+}
+
+/// Proxy a chat completion to the configured AI provider from the backend
+/// (no CORS, and the key never enters the webview's network layer). OpenAI,
+/// Ollama, LM Studio, and custom endpoints speak the OpenAI-compatible
+/// chat-completions API; Anthropic uses its native Messages API. Returns the
+/// assistant message text plus token usage.
 #[tauri::command]
 pub async fn ai_chat(
-    api_key: String,
+    provider: String,
     model: String,
     system: String,
     user: String,
     json_mode: bool,
     reasoning: bool,
+    base_url: Option<String>,
+    state: State<'_, AppState>,
 ) -> AppResult<AiChatResult> {
-    if api_key.trim().is_empty() {
-        return Err(AppError::Parse("OpenAI API key is not set — add it in Studio settings".into()));
+    let label = provider_label(&provider);
+    let key = stored_ai_key(&state, &provider);
+    // Cloud providers need a key; local/custom endpoints usually don't.
+    if key.is_none() && matches!(provider.as_str(), "openai" | "anthropic") {
+        return Err(AppError::Parse(format!(
+            "{label} API key is not set — add it in Settings → Prompts & AI"
+        )));
     }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| AppError::Parse(format!("http client: {e}")))?;
+
+    if provider == "anthropic" {
+        return anthropic_chat(&client, &key.unwrap(), &model, &system, &user, reasoning).await;
+    }
+
+    // ---- OpenAI-compatible path (openai / ollama / lmstudio / custom) -----
+    let base = base_url
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| match provider.as_str() {
+            "ollama" => "http://localhost:11434/v1".into(),
+            "lmstudio" => "http://localhost:1234/v1".into(),
+            _ => "https://api.openai.com/v1".into(),
+        });
+    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
 
     let mut body = json!({
         "model": model,
@@ -1350,39 +2910,40 @@ pub async fn ai_chat(
             { "role": "user", "content": user },
         ],
     });
-    if json_mode {
+    // Local servers vary in which OpenAI extensions they accept — only send
+    // OpenAI-specific fields to OpenAI itself (and response_format to custom
+    // endpoints, which are usually cloud-compatible).
+    if json_mode && matches!(provider.as_str(), "openai" | "custom") {
         body["response_format"] = json!({ "type": "json_object" });
     }
-    // Same model in both modes — Deep Think just reasons harder. "none" keeps
-    // Normal fast; "high" turns on reasoning. (gpt-5.4 supports
-    // none/low/medium/high/xhigh — not "minimal".)
-    body["reasoning_effort"] = json!(if reasoning { "high" } else { "none" });
+    if provider == "openai" {
+        // Same model in both modes — Deep Think just reasons harder. "none"
+        // keeps Normal fast. (gpt-5.4 supports none/low/medium/high/xhigh.)
+        body["reasoning_effort"] = json!(if reasoning { "high" } else { "none" });
+    }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::Parse(format!("http client: {e}")))?;
-
-    let resp = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(api_key.trim())
-        .json(&body)
+    let mut req = client.post(&url).json(&body);
+    if let Some(k) = key {
+        req = req.bearer_auth(k);
+    }
+    let resp = req
         .send()
         .await
-        .map_err(|e| AppError::Parse(format!("OpenAI request failed: {e}")))?;
+        .map_err(|e| AppError::Parse(format!("{label} request failed: {e}")))?;
 
     let status = resp.status();
     let payload: Value = resp
         .json()
         .await
-        .map_err(|e| AppError::Parse(format!("OpenAI response unreadable: {e}")))?;
+        .map_err(|e| AppError::Parse(format!("{label} response unreadable: {e}")))?;
 
     if !status.is_success() {
         let msg = payload
             .pointer("/error/message")
             .and_then(|v| v.as_str())
+            .or_else(|| payload.pointer("/error").and_then(|v| v.as_str()))
             .unwrap_or("unknown error");
-        return Err(AppError::Parse(format!("OpenAI ({status}): {msg}")));
+        return Err(AppError::Parse(format!("{label} ({status}): {msg}")));
     }
 
     let content = payload
@@ -1390,7 +2951,7 @@ pub async fn ai_chat(
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| AppError::Parse("OpenAI returned an empty response".into()))?;
+        .ok_or_else(|| AppError::Parse(format!("{label} returned an empty response")))?;
 
     let usage = |key: &str| payload.pointer(&format!("/usage/{key}")).and_then(|v| v.as_u64()).unwrap_or(0);
     Ok(AiChatResult {
@@ -1398,6 +2959,88 @@ pub async fn ai_chat(
         input_tokens: usage("prompt_tokens"),
         output_tokens: usage("completion_tokens"),
         total_tokens: usage("total_tokens"),
+    })
+}
+
+/// Anthropic Messages API. System prompt is a top-level field; thinking is
+/// adaptive by default on current models, so Deep Think maps to a higher
+/// `output_config.effort` instead of a separate reasoning switch.
+async fn anthropic_chat(
+    client: &reqwest::Client,
+    api_key: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+    reasoning: bool,
+) -> AppResult<AiChatResult> {
+    let mut body = json!({
+        "model": model,
+        "max_tokens": 16000,
+        "system": system,
+        "messages": [ { "role": "user", "content": user } ],
+    });
+    // `effort` is unsupported on claude-haiku-4-5 / claude-sonnet-4-5 —
+    // sending it there would 400. Those models just run at their default.
+    if !model.contains("haiku") && !model.contains("sonnet-4-5") {
+        body["output_config"] = json!({ "effort": if reasoning { "high" } else { "low" } });
+    }
+
+    let resp = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Parse(format!("Anthropic request failed: {e}")))?;
+
+    let status = resp.status();
+    let payload: Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Parse(format!("Anthropic response unreadable: {e}")))?;
+
+    if !status.is_success() {
+        let msg = payload
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+        return Err(AppError::Parse(format!("Anthropic ({status}): {msg}")));
+    }
+
+    if payload.pointer("/stop_reason").and_then(|v| v.as_str()) == Some("refusal") {
+        return Err(AppError::Parse(
+            "Anthropic declined this request (safety classifier) — try rephrasing".into(),
+        ));
+    }
+
+    // Content is an array of blocks; the answer is the first non-empty text
+    // block (thinking blocks may precede it).
+    let content = payload
+        .pointer("/content")
+        .and_then(|v| v.as_array())
+        .and_then(|blocks| {
+            blocks.iter().find_map(|b| {
+                if b.pointer("/type").and_then(|t| t.as_str()) == Some("text") {
+                    b.pointer("/text")
+                        .and_then(|t| t.as_str())
+                        .filter(|s| !s.trim().is_empty())
+                        .map(str::to_string)
+                } else {
+                    None
+                }
+            })
+        })
+        .ok_or_else(|| AppError::Parse("Anthropic returned an empty response".into()))?;
+
+    let usage = |key: &str| payload.pointer(&format!("/usage/{key}")).and_then(|v| v.as_u64()).unwrap_or(0);
+    let input = usage("input_tokens");
+    let output = usage("output_tokens");
+    Ok(AiChatResult {
+        content,
+        input_tokens: input,
+        output_tokens: output,
+        total_tokens: input + output,
     })
 }
 
@@ -1773,6 +3416,21 @@ async fn run_collection_method(
                 .transpose()?
                 .ok_or_else(|| AppError::Parse("createIndex(keys, options?) needs keys".into()))?;
             let opts = args.get(1);
+            // Full option parity with the GUI index builder: partial filter,
+            // collation, and hidden used to be silently dropped here.
+            let partial = opts
+                .and_then(|o| o.get("partialFilterExpression"))
+                .map(to_doc)
+                .transpose()?;
+            let collation = opts
+                .and_then(|o| o.get("collation"))
+                .map(to_doc)
+                .transpose()?
+                .map(|d| {
+                    mongodb::bson::from_document::<mongodb::options::Collation>(d)
+                        .map_err(|e| AppError::Parse(format!("collation: {e}")))
+                })
+                .transpose()?;
             let options = IndexOptions::builder()
                 .name(opts.and_then(|o| o.get("name")).and_then(|v| v.as_str()).map(str::to_string))
                 .unique(opts.and_then(|o| o.get("unique")).and_then(|v| v.as_bool()).filter(|b| *b))
@@ -1782,6 +3440,9 @@ async fn run_collection_method(
                         .map(Duration::from_secs),
                 )
                 .sparse(opts.and_then(|o| o.get("sparse")).and_then(|v| v.as_bool()).filter(|b| *b))
+                .hidden(opts.and_then(|o| o.get("hidden")).and_then(|v| v.as_bool()).filter(|b| *b))
+                .partial_filter_expression(partial)
+                .collation(collation)
                 .build();
             let model = IndexModel::builder().keys(keys).options(options).build();
             let result = coll.create_index(model).await?;

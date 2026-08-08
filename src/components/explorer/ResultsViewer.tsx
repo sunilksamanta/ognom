@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CodeEditor } from "@/components/CodeEditor";
 import { ValueTree } from "@/components/explorer/ValueTree";
 import { idLabel, kindOf, leafText, toPlainJson, toShellText, type BsonKind } from "@/lib/bson";
@@ -43,6 +44,17 @@ export interface DocActions {
   onDuplicate?: (doc: Doc) => void;
   onDelete?: (doc: Doc) => void;
 }
+
+/** Multi-select support for the table view (documents tab only). Keys are
+ *  `JSON.stringify(doc._id)`; docs without an `_id` aren't selectable. */
+export interface DocSelection {
+  selected: Set<string>;
+  onToggle: (key: string, on: boolean) => void;
+  onToggleAll: (keys: string[], on: boolean) => void;
+}
+
+export const docSelectionKey = (doc: Doc): string | null =>
+  "_id" in doc ? JSON.stringify(doc._id) : null;
 
 const copyText = async (text: string, label: string) => {
   await navigator.clipboard.writeText(text);
@@ -331,8 +343,24 @@ function FieldValueDialog({
   );
 }
 
-function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
+function TableView({
+  docs,
+  actions,
+  selection,
+}: {
+  docs: Doc[];
+  actions: DocActions;
+  selection?: DocSelection;
+}) {
   const [preview, setPreview] = useState<FieldPreview | null>(null);
+  const selectableKeys = useMemo(
+    () => docs.map(docSelectionKey).filter((k): k is string => k !== null),
+    [docs]
+  );
+  const allSelected =
+    selection !== undefined &&
+    selectableKeys.length > 0 &&
+    selectableKeys.every((k) => selection.selected.has(k));
   // Every field across the page becomes a column, ordered by how often it
   // appears (then alphabetically). Row count is already capped by the page
   // size, so the full column set stays cheap to render inside the scroller.
@@ -354,6 +382,16 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
       <table className="w-full border-separate border-spacing-0 font-data">
         <thead className="sticky top-0 z-10">
           <tr>
+            {selection && (
+              <th className="w-8 border-b border-r bg-card px-2 py-1.5">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={(v) => selection.onToggleAll(selectableKeys, v === true)}
+                  aria-label="Select all on this page"
+                  className="translate-y-px"
+                />
+              </th>
+            )}
             {columns.map((col) => (
               <th
                 key={col}
@@ -369,8 +407,32 @@ function TableView({ docs, actions }: { docs: Doc[]; actions: DocActions }) {
             <DocContextMenu key={i} doc={doc} actions={actions} asChild>
             <tr
               onDoubleClick={() => actions.onView(doc)}
-              className="group transition-colors odd:bg-muted/30 hover:bg-accent/60"
+              className={cn(
+                "group transition-colors odd:bg-muted/30 hover:bg-accent/60",
+                selection &&
+                  docSelectionKey(doc) !== null &&
+                  selection.selected.has(docSelectionKey(doc)!) &&
+                  "bg-primary/10 odd:bg-primary/10"
+              )}
             >
+              {selection && (
+                <td
+                  className="w-8 border-b border-r border-border/60 px-2 py-1 align-top"
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
+                  {docSelectionKey(doc) !== null && (
+                    <Checkbox
+                      checked={selection.selected.has(docSelectionKey(doc)!)}
+                      onCheckedChange={(v) =>
+                        selection.onToggle(docSelectionKey(doc)!, v === true)
+                      }
+                      aria-label="Select document"
+                      className="translate-y-px"
+                    />
+                  )}
+                </td>
+              )}
               {columns.map((col) => {
                 const present = col in doc;
                 const value = present ? doc[col] : undefined;
@@ -418,6 +480,8 @@ interface ResultsViewerProps {
   view: ViewMode;
   actions: DocActions;
   emptyText?: string;
+  /** Enables the checkbox column in table view. */
+  selection?: DocSelection;
 }
 
 export const ResultsViewer = memo(function ResultsViewer({
@@ -425,6 +489,7 @@ export const ResultsViewer = memo(function ResultsViewer({
   view,
   actions,
   emptyText,
+  selection,
 }: ResultsViewerProps) {
   if (docs.length === 0) {
     return (
@@ -437,7 +502,7 @@ export const ResultsViewer = memo(function ResultsViewer({
     );
   }
 
-  if (view === "table") return <TableView docs={docs} actions={actions} />;
+  if (view === "table") return <TableView docs={docs} actions={actions} selection={selection} />;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">

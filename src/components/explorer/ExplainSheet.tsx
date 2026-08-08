@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Sparkles, Zap } from "lucide-react";
+import { toast } from "sonner";
+import { useStudio, aiNotReadyMessage, aiReady } from "@/stores/studio";
+import { interpretExplain } from "@/lib/ai";
 import {
   Dialog,
   DialogContent,
@@ -7,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { api, errMsg, type ExplainSummary, type StageInput } from "@/lib/api";
 import { formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
@@ -31,12 +35,64 @@ export function ExplainSheet({ request, open, onOpenChange }: ExplainSheetProps)
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createdIndex, setCreatedIndex] = useState<string | null>(null);
+
+  // ── AI interpretation ────────────────────────────────────────────────────
+  const provider = useStudio((s) => s.provider);
+  const ready = useStudio((s) => aiReady(s));
+  const [aiNotes, setAiNotes] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+
+  const askAi = async () => {
+    if (!request || !summary) return;
+    if (!ready) {
+      toast.error(aiNotReadyMessage(provider));
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const { raw, ...rest } = summary;
+      const res = await interpretExplain({
+        database: request.database,
+        collection: request.collection,
+        summary: rest,
+        raw,
+      });
+      setAiNotes(res.notes);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const createSuggested = async () => {
+    if (!request || !summary?.suggestedIndex) return;
+    setCreating(true);
+    try {
+      const name = await api.createIndex({
+        database: request.database,
+        collection: request.collection,
+        keysText: JSON.stringify(summary.suggestedIndex),
+        unique: false,
+      });
+      setCreatedIndex(name);
+      toast.success(`Index "${name}" created — re-run the query to use it`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !request) return;
     setSummary(null);
     setError(null);
     setShowRaw(false);
+    setCreatedIndex(null);
+    setAiNotes(null);
     setLoading(true);
     api
       .explainQuery({ verbosity: "executionStats", ...request })
@@ -133,6 +189,37 @@ export function ExplainSheet({ request, open, onOpenChange }: ExplainSheetProps)
                 ))}
               </div>
 
+              {summary.isCollectionScan && summary.suggestedIndex && (
+                <div className="flex items-center gap-3 rounded-lg border border-info/40 bg-info/10 px-3.5 py-3">
+                  <Zap className="h-4 w-4 shrink-0 text-info" />
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="font-medium">Suggested index</p>
+                    <code className="break-all font-mono text-xs text-muted-foreground">
+                      {JSON.stringify(summary.suggestedIndex)}
+                    </code>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Equality → sort → range field order, derived from this query&apos;s shape.
+                    </p>
+                  </div>
+                  {createdIndex ? (
+                    <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Created
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="h-7 shrink-0 gap-1.5 text-xs"
+                      disabled={creating}
+                      onClick={() => void createSuggested()}
+                    >
+                      {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Create index
+                    </Button>
+                  )}
+                </div>
+              )}
+
               {summary.stages.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-xs font-medium text-muted-foreground">Plan stages</p>
@@ -152,6 +239,31 @@ export function ExplainSheet({ request, open, onOpenChange }: ExplainSheetProps)
                     ))}
                   </div>
                 </div>
+              )}
+
+              {aiNotes ? (
+                <div className="rounded-lg border border-info/40 bg-info/10 px-3.5 py-3">
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-info">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI reading
+                  </p>
+                  <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{aiNotes}</p>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={aiBusy}
+                  onClick={() => void askAi()}
+                >
+                  {aiBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Ask AI to read this plan
+                </Button>
               )}
 
               <button
