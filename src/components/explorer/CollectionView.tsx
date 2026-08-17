@@ -24,13 +24,13 @@ import { exportCollection, importDocuments } from "@/lib/files";
 import { formatBytes, formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 
-const VIEWS: { id: TabMode; label: string; advanced?: boolean }[] = [
+/** Views of the collection. Aggregate and Shell are query modes and live in
+ *  the dock instead. */
+const VIEWS: { id: TabMode; label: string }[] = [
   { id: "table", label: "Table" },
   { id: "documents", label: "Documents" },
   { id: "schema", label: "Schema" },
-  { id: "aggregate", label: "Aggregate" },
   { id: "indexes", label: "Indexes" },
-  { id: "shell", label: "Shell", advanced: true },
 ];
 
 /**
@@ -42,7 +42,6 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
   const setDrawer = useExplorer((s) => s.setDrawer);
   const runFind = useExplorer((s) => s.runFind);
   const advancedMode = useSettings((s) => s.advancedMode);
-  const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
   const readOnly = useConnections(
     (s) => s.workspaces.find((w) => w.info.id === s.activeId)?.readOnly ?? false
   );
@@ -104,35 +103,17 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
 
       <div className="viewrow no-select">
         <div className="tabsl" role="tablist">
-          {VIEWS.map((v) =>
-            v.advanced && !advancedMode ? (
-              <Tooltip key={v.id}>
-                <TooltipTrigger asChild>
-                  <button
-                    role="tab"
-                    style={{ opacity: 0.5 }}
-                    onClick={() => {
-                      setAdvancedMode(true);
-                      setTabMode(tab.id, v.id);
-                    }}
-                  >
-                    {v.label}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Raw shell statements - click to enable advanced mode</TooltipContent>
-              </Tooltip>
-            ) : (
-              <button
-                key={v.id}
-                role="tab"
-                aria-selected={tab.mode === v.id}
-                className={cn(tab.mode === v.id && "on")}
-                onClick={() => setTabMode(tab.id, v.id)}
-              >
-                {v.label}
-              </button>
-            )
-          )}
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              role="tab"
+              aria-selected={tab.mode === v.id}
+              className={cn(tab.mode === v.id && "on")}
+              onClick={() => setTabMode(tab.id, v.id)}
+            >
+              {v.label}
+            </button>
+          ))}
         </div>
         <div className="r">
           <DropdownMenu modal={false}>
@@ -217,7 +198,7 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
       {tab.mode === "indexes" && <IndexesPane tab={tab} active={active} readOnly={readOnly} />}
       {tab.mode === "shell" && advancedMode && <ShellPane tab={tab} />}
 
-      {(inFind || tab.mode === "aggregate") && <Dock tab={tab} />}
+      {(inFind || tab.mode === "aggregate" || tab.mode === "shell") && <Dock tab={tab} />}
 
       <DropCollectionDialog
         target={dropOpen ? { db: tab.database, coll: tab.collection } : null}

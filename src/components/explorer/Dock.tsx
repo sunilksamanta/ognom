@@ -73,6 +73,8 @@ export function Dock({ tab }: { tab: Tab }) {
   const [lastFindView, setLastFindView] = useState<"table" | "documents">("table");
 
   const isAgg = tab.mode === "aggregate";
+  const isShell = tab.mode === "shell";
+  const advancedMode = useSettings((s) => s.advancedMode);
   const d = tab.docs;
   const a = tab.agg;
 
@@ -144,8 +146,8 @@ export function Dock({ tab }: { tab: Tab }) {
     <div className="dock">
       <div className="modes no-select">
         <button
-          className={cn("mode", !isAgg && "on")}
-          onClick={() => isAgg && setTabMode(tab.id, lastFindView)}
+          className={cn("mode", !isAgg && !isShell && "on")}
+          onClick={() => (isAgg || isShell) && setTabMode(tab.id, lastFindView)}
         >
           <Search />
           Find
@@ -154,8 +156,32 @@ export function Dock({ tab }: { tab: Tab }) {
           <Rows3 />
           Aggregate
         </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className={cn("mode", isShell && "on")}
+              style={!advancedMode && !isShell ? { opacity: 0.55 } : undefined}
+              onClick={() => {
+                if (isShell) return;
+                setAdvancedMode(true);
+                setTabMode(tab.id, "shell");
+              }}
+            >
+              <Terminal />
+              Shell
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {advancedMode ? "Raw shell statements, one at a time" : "Raw shell statements - enables advanced mode"}
+          </TooltipContent>
+        </Tooltip>
         <div className="r">
-          {isAgg ? (
+          {isShell ? (
+            <>
+              {tab.shell.outcome && <span>{tab.shell.outcome.execMs} ms</span>}
+              <span>{tab.database}</span>
+            </>
+          ) : isAgg ? (
             <>
               <span>{enabledStages} stage{enabledStages === 1 ? "" : "s"}</span>
               {a.docs && <span>{formatCount(a.docs.length)} results</span>}
@@ -228,7 +254,7 @@ export function Dock({ tab }: { tab: Tab }) {
         </div>
       </div>
 
-      {isAgg ? (
+      {isShell ? null : isAgg ? (
         <div className="qline">
           <CheckRow on={a.allowDiskUse} onChange={(v) => patchAgg(tab.id, { allowDiskUse: v })}>
             Allow disk use
