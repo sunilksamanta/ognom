@@ -32,6 +32,8 @@ button{font-family:inherit;color:inherit}
 .ico{width:30px;height:30px;border-radius:var(--r-sm);background:transparent;border:0;color:var(--text-2);display:grid;place-items:center;cursor:pointer;transition:.15s var(--ease);flex:none}
 .ico:hover{background:var(--hover);color:var(--text)}
 .ico:disabled{opacity:.4;cursor:default}
+.ico:focus{outline:none}
+.ico:focus-visible{box-shadow:0 0 0 3px var(--accent-soft)}
 .ico svg{width:16px;height:16px}
 .ico.on{background:var(--accent-soft);color:var(--accent)}
 .ico.sm{width:24px;height:24px}.ico.sm svg{width:14px;height:14px}
