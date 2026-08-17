@@ -82,8 +82,14 @@ export function ensureMonaco(): void {
 
   monaco.languages.register({ id: "mongodb" });
 
-  monaco.languages.registerCompletionItemProvider("mongodb", {
-    triggerCharacters: [".", "$", '"', "'", "{", ","],
+  // HMR in dev re-runs this module: drop the previous provider so items are
+  // never listed twice.
+  const g = globalThis as { __ognomCompletion?: { dispose(): void } };
+  g.__ognomCompletion?.dispose();
+  g.__ognomCompletion = monaco.languages.registerCompletionItemProvider("mongodb", {
+    // Only characters that are part of what is being typed - never a brace or
+    // comma, so the list appears while typing (or on Ctrl+Space), not on "{".
+    triggerCharacters: [".", "$"],
     provideCompletionItems(model, position) {
       // Context comes from everything before the cursor (bounded), not just
       // the current line - filter bodies span lines, and a key typed on line 2
@@ -100,23 +106,31 @@ export function ensureMonaco(): void {
       );
       const kind = monaco.languages.CompletionItemKind;
       const items: monaco.languages.CompletionItem[] = [];
+      // Fields sort before operators before helpers: `sortText` orders the
+      // list, and `group` keeps insertion order stable inside a group.
+      let group = 0;
       const push = (
         labels: string[],
         itemKind: monaco.languages.CompletionItemKind,
         opts?: { method?: boolean; detail?: string }
       ) => {
-        for (const label of labels) {
+        group += 1;
+        const seen = new Set<string>();
+        labels.forEach((label, i) => {
+          if (seen.has(label)) return;
+          seen.add(label);
           items.push({
             label,
             kind: itemKind,
             detail: opts?.detail,
+            sortText: `${group}-${String(i).padStart(4, "0")}`,
             insertText: opts?.method ? `${label}($0)` : label,
             insertTextRules: opts?.method
               ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
               : undefined,
             range,
           });
-        }
+        });
       };
 
       // db.<collection | dbMethod>
