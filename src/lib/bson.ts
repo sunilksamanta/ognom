@@ -126,7 +126,7 @@ export function leafText(v: unknown): string {
     case "maxKey":
       return "MaxKey";
     case "code":
-      return "Code(…)";
+      return "Code(...)";
     case "array":
       return `[ ${(v as unknown[]).length} ]`;
     case "object":
@@ -219,7 +219,7 @@ export function toShellText(v: unknown, indent = 0): string {
 }
 
 // ---------------------------------------------------------------------------
-// plain JSON (every BSON wrapper collapsed — no $oid / $date / $numberLong / …)
+// plain JSON (every BSON wrapper collapsed - no $oid / $date / $numberLong / ...)
 // ---------------------------------------------------------------------------
 
 /** Collapse a relaxed-extJSON value into a pure JS value with no `$`-wrappers. */
@@ -285,7 +285,7 @@ export function toPlainValue(v: unknown): unknown {
   }
 }
 
-/** A value as pure JSON text — every BSON wrapper collapsed to a plain value. */
+/** A value as pure JSON text - every BSON wrapper collapsed to a plain value. */
 export function toPlainJson(v: unknown): string {
   return JSON.stringify(toPlainValue(v), null, 2);
 }
@@ -302,7 +302,7 @@ export function idLabel(doc: Obj): string {
   const k = kindOf(id);
   if (k === "objectId") return (id as Obj).$oid as string;
   const text = leafText(id);
-  return text.length > 40 ? text.slice(0, 37) + "…" : text;
+  return text.length > 40 ? text.slice(0, 37) + "..." : text;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ export function idLabel(doc: Obj): string {
 // ---------------------------------------------------------------------------
 
 export function formatBytes(n?: number | null): string {
-  if (n === null || n === undefined) return "—";
+  if (n === null || n === undefined) return " - ";
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = n / 1024;
@@ -323,7 +323,7 @@ export function formatBytes(n?: number | null): string {
 }
 
 export function formatCount(n?: number | null): string {
-  if (n === null || n === undefined) return "—";
+  if (n === null || n === undefined) return " - ";
   return n.toLocaleString("en-US");
 }
 

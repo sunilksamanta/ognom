@@ -13,7 +13,7 @@ const ScrollArea = React.forwardRef<
     {...props}
   >
     {/* radix sets display:table on the inner div, which breaks text truncation
-        and forces horizontal overflow — flatten it back to a block */}
+        and forces horizontal overflow - flatten it back to a block */}
     <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block [&>div]:w-full">
       {children}
     </ScrollAreaPrimitive.Viewport>
@@ -40,7 +40,7 @@ const ScrollBar = React.forwardRef<
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-line-2" />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ))
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName

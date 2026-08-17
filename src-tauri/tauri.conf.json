@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ognom",
-  "version": "1.11.0",
+  "version": "2.0.0",
   "identifier": "com.ognom.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -15,8 +15,8 @@
         "title": "Ognom",
         "width": 1440,
         "height": 900,
-        "minWidth": 1024,
-        "minHeight": 700,
+        "minWidth": 1100,
+        "minHeight": 680,
         "center": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
@@ -41,7 +41,7 @@
     "category": "DeveloperTool",
     "createUpdaterArtifacts": true,
     "shortDescription": "Free, lightweight, no-nonsense MongoDB client",
-    "longDescription": "Ognom is a free and open-source MongoDB desktop client. Browse data in JSON or table form, edit documents, build aggregation pipelines, and run real shell queries \u2014 with credentials encrypted in your OS keychain.",
+    "longDescription": "Ognom is a free and open-source MongoDB desktop client. Browse data in table or document form, edit documents field by field, build aggregation pipelines, inspect indexes and schema, and run real shell statements - with credentials encrypted in your OS keychain and production connections opening read-only.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

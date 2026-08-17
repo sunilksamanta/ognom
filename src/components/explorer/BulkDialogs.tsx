@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -10,11 +12,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CheckRow } from "@/components/ui/check-row";
 import { CodeEditor } from "@/components/CodeEditor";
 import { api, errMsg, type Doc } from "@/lib/api";
 import { previewValue } from "@/lib/diff";
+import { runExport } from "@/lib/files";
+import { useSettings } from "@/stores/settings";
 
 /**
  * Bulk update / delete against the tab's current filter, with an
@@ -85,25 +88,26 @@ function AffectedPreview({
   }, [active, database, collection, filter]);
 
   return (
-    <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
+    <div className="notice">
       {loading ? (
-        <span className="flex items-center gap-2 text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" /> counting matching documents…
-        </span>
-      ) : count === null ? (
-        <span className="text-muted-foreground">Match count unavailable (slow count?)</span>
-      ) : (
         <>
-          <p>
-            <span className="font-semibold tabular-nums">{count.toLocaleString()}</span>
-            {!exact && "+"} document{count === 1 ? "" : "s"} will be affected
-          </p>
-          {sample.length > 0 && (
-            <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-              e.g. {sample.map((d) => previewValue(d._id)).join(", ")}
-            </p>
-          )}
+          <Loader2 className="spin" />
+          <span className="text-text-3">counting matching documents...</span>
         </>
+      ) : count === null ? (
+        <span className="text-text-3">Match count unavailable (slow count?)</span>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <div>
+            <b className="mono font-semibold tabular-nums text-text">{count.toLocaleString()}</b>
+            {!exact && "+"} document{count === 1 ? "" : "s"} will be affected
+          </div>
+          {sample.length > 0 && (
+            <div className="mt-1 truncate font-mono text-[10.5px] text-text-3">
+              e.g. <span className="oi">{sample.map((d) => previewValue(d._id)).join(", ")}</span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -145,26 +149,24 @@ export function BulkUpdateDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="max-w-[560px]">
         <DialogHeader>
           <DialogTitle>Bulk update</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              Apply an operator update to every document in{" "}
-              <span className="font-mono font-medium text-foreground">{collection}</span> matching
-              the current filter.
-            </div>
+          <DialogDescription>
+            {database}.{collection} · operator update on every document matching the current filter
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-normal text-muted-foreground">Filter</Label>
-            <Input
-              value={filter.trim() || "{ } — matches every document"}
+        <DialogBody>
+          <div className="fld">
+            <label>Filter</label>
+            <input
+              className="in"
+              value={filter.trim() || "{ }"}
               readOnly
-              className="h-8 font-mono text-xs text-muted-foreground"
+              tabIndex={-1}
             />
+            {!filter.trim() && <div className="hint">Empty filter, matches every document.</div>}
           </div>
           <AffectedPreview
             database={database}
@@ -172,20 +174,19 @@ export function BulkUpdateDialog({
             filter={filter}
             active={open}
           />
-          <div className="space-y-1.5">
-            <Label className="text-xs font-normal text-muted-foreground">
-              Update (operator syntax: $set, $unset, $inc, …)
-            </Label>
+          <div className="fld">
+            <label>Update</label>
             <CodeEditor value={update} onChange={setUpdate} height={120} path="bulk/update" />
+            <div className="hint">Operator syntax: $set, $unset, $inc, ...</div>
           </div>
-        </div>
+        </DialogBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button size="sm" disabled={busy} onClick={() => void run()}>
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Button disabled={busy} onClick={() => void run()}>
+            {busy && <Loader2 className="spin" />}
             Update matching
           </Button>
         </DialogFooter>
@@ -203,12 +204,15 @@ export function BulkDeleteDialog({
   onDone,
 }: BulkProps) {
   const [confirm, setConfirm] = useState("");
+  const [backup, setBackup] = useState(false);
   const [busy, setBusy] = useState(false);
+  const offerBackup = useSettings((s) => s.offerBackupOnDelete);
   const emptyFilter = !filter.trim() || filter.trim() === "{}";
 
   useEffect(() => {
     if (open) {
       setConfirm("");
+      setBackup(false);
       setBusy(false);
     }
   }, [open]);
@@ -216,6 +220,31 @@ export function BulkDeleteDialog({
   const run = async () => {
     setBusy(true);
     try {
+      if (offerBackup && backup) {
+        const path = await save({
+          title: `Backup matching documents from ${collection}`,
+          defaultPath: `${collection}-bulk-backup.json`,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        }).catch(() => null);
+        if (!path) {
+          toast.info("Delete cancelled - no backup was written");
+          setBusy(false);
+          return;
+        }
+        const outcome = await runExport({
+          database,
+          collection,
+          filter,
+          sort: "",
+          format: "json",
+          path,
+        });
+        if (!outcome || outcome.canceled) {
+          toast.info("Delete cancelled - the backup export did not complete");
+          setBusy(false);
+          return;
+        }
+      }
       const r = await api.bulkDelete(database, collection, filter);
       toast.success(`Deleted ${r.deleted.toLocaleString()} document${r.deleted === 1 ? "" : "s"} · ${r.execMs}ms`);
       onDone();
@@ -227,73 +256,74 @@ export function BulkDeleteDialog({
     }
   };
 
+  const ok = !emptyFilter && confirm === collection;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="max-w-[520px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-destructive">
-            <AlertTriangle className="h-4 w-4" />
-            Bulk delete
-          </DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              Permanently delete every document in{" "}
-              <span className="font-mono font-medium text-foreground">{collection}</span> matching
-              the current filter. This cannot be undone.
-            </div>
+          <DialogTitle>Bulk delete</DialogTitle>
+          <DialogDescription>
+            {database}.{collection} · every document matching the current filter
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-normal text-muted-foreground">Filter</Label>
-            <Input
-              value={filter.trim() || "{ }"}
-              readOnly
-              className="h-8 font-mono text-xs text-muted-foreground"
-            />
+        <DialogBody>
+          <div className="fld">
+            <label>Filter</label>
+            <input className="in" value={filter.trim() || "{ }"} readOnly tabIndex={-1} />
           </div>
           {emptyFilter ? (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              The filter is empty — bulk delete refuses to wipe a whole collection. Use
-              right-click → Clear Collection for that.
-            </p>
+            <div className="warnbox">
+              <TriangleAlert />
+              <div>
+                <b>The filter is empty.</b> Bulk delete refuses to wipe a whole collection. Use
+                right-click, Clear collection for that.
+              </div>
+            </div>
           ) : (
             <>
+              <div className="warnbox">
+                <TriangleAlert />
+                <div>
+                  This permanently deletes every matching document. It cannot be undone from Ognom.
+                </div>
+              </div>
               <AffectedPreview
                 database={database}
                 collection={collection}
                 filter={filter}
                 active={open}
               />
-              <div className="space-y-1.5">
-                <Label className="text-xs font-normal text-muted-foreground">
-                  Type <span className="font-mono font-medium text-foreground">{collection}</span>{" "}
-                  to confirm
-                </Label>
-                <Input
+              <div className="fld">
+                <label htmlFor="bulk-delete-confirm">Type the collection name to confirm</label>
+                <input
+                  id="bulk-delete-confirm"
+                  className="in"
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
-                  className="h-8 font-mono text-xs"
+                  onKeyDown={(e) => e.key === "Enter" && ok && !busy && void run()}
+                  placeholder={collection}
                   autoComplete="off"
                   spellCheck={false}
+                  autoFocus
                 />
               </div>
+              {offerBackup && (
+                <CheckRow on={backup} onChange={setBackup} disabled={busy}>
+                  Export the matching documents to a JSON file first
+                </CheckRow>
+              )}
             </>
           )}
-        </div>
+        </DialogBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            disabled={busy || emptyFilter || confirm !== collection}
-            onClick={() => void run()}
-          >
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Button variant="destructive" disabled={busy || !ok} onClick={() => void run()}>
+            {busy && <Loader2 className="spin" />}
             Delete matching
           </Button>
         </DialogFooter>

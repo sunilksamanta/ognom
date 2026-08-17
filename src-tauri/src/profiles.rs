@@ -47,7 +47,7 @@ fn pct_encode_preserving(s: &str) -> String {
 }
 
 /// Repair a pasted connection URI whose userinfo has unescaped reserved
-/// characters — the classic "my password contains `@`" paste. Re-encodes only
+/// characters - the classic "my password contains `@`" paste. Re-encodes only
 /// the `user:pass` segment and returns the fixed URI, or `None` if there's no
 /// userinfo to fix. The host has no `@`, so the last `@` before the path is the
 /// real separator even when the password itself contains `@`.
@@ -66,7 +66,7 @@ pub fn repair_userinfo(uri: &str) -> Option<String> {
     let userinfo = &head[..at];
     let hostpath = &head[at + 1..];
 
-    // user:pass — split on the FIRST ':' so colons in the password survive.
+    // user:pass - split on the FIRST ':' so colons in the password survive.
     let new_userinfo = match userinfo.split_once(':') {
         Some((user, pass)) => {
             format!("{}:{}", pct_encode_preserving(user), pct_encode_preserving(pass))
@@ -238,6 +238,11 @@ pub struct StoredProfile {
     pub id: String,
     pub name: String,
     pub color: Option<String>,
+    /// Session access: "readwrite" (default), "readonly", or "production".
+    /// Read-only and production workspaces open without write access; the
+    /// user switches to edit mode explicitly in the UI.
+    #[serde(default = "default_access")]
+    pub access: String,
     pub kind: ProfileKind,
     #[serde(default)]
     pub fields: ConnFields,
@@ -256,6 +261,8 @@ pub struct ProfileInput {
     pub id: Option<String>,
     pub name: String,
     pub color: Option<String>,
+    #[serde(default = "default_access")]
+    pub access: String,
     pub kind: ProfileKind,
     #[serde(default)]
     pub fields: ConnFields,
@@ -271,6 +278,7 @@ pub struct ProfileSummary {
     pub id: String,
     pub name: String,
     pub color: Option<String>,
+    pub access: String,
     pub kind: ProfileKind,
     pub host_summary: String,
     pub srv: bool,
@@ -279,6 +287,12 @@ pub struct ProfileSummary {
     pub fields: ConnFields,
     pub last_used_at: Option<String>,
 }
+
+pub fn default_access() -> String {
+    "readwrite".to_string()
+}
+
+pub const ACCESS_MODES: &[&str] = &["readwrite", "readonly", "production"];
 
 /// Strip credentials from a pasted URI for display: scheme://user@host/...
 fn sanitize_uri(uri: &str) -> String {
@@ -311,6 +325,7 @@ impl StoredProfile {
             id: self.id.clone(),
             name: self.name.clone(),
             color: self.color.clone(),
+            access: self.access.clone(),
             kind: self.kind.clone(),
             host_summary,
             srv,
@@ -379,6 +394,9 @@ impl ProfileStore {
         if input.name.trim().is_empty() {
             return Err(AppError::Other("connection name is required".into()));
         }
+        if !ACCESS_MODES.contains(&input.access.as_str()) {
+            return Err(AppError::Other(format!("unknown access mode '{}'", input.access)));
+        }
         let existing = input
             .id
             .as_ref()
@@ -429,6 +447,7 @@ impl ProfileStore {
             id: input.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             name: input.name.trim().to_string(),
             color: input.color.clone(),
+            access: input.access.clone(),
             kind: input.kind.clone(),
             fields: input.fields.clone(),
             uri_summary,
@@ -496,6 +515,7 @@ impl ProfileStore {
             out.push(crate::portable::ExportConn {
                 name: p.name.clone(),
                 color: p.color.clone(),
+                access: p.access.clone(),
                 kind: p.kind.clone(),
                 fields: p.fields.clone(),
                 uri_summary: p.uri_summary.clone(),
@@ -542,6 +562,7 @@ impl ProfileStore {
                 id: uuid::Uuid::new_v4().to_string(),
                 name,
                 color: c.color,
+                access: if ACCESS_MODES.contains(&c.access.as_str()) { c.access } else { default_access() },
                 kind: c.kind,
                 fields: c.fields,
                 uri_summary: c.uri_summary,

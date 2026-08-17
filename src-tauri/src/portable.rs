@@ -1,11 +1,11 @@
 //! Portable connection export / import.
 //!
 //! Two flavours of export file, both JSON:
-//!  * **Safe** (`encrypted: false`) — profile metadata only, no secrets. The
+//!  * **Safe** (`encrypted: false`) - profile metadata only, no secrets. The
 //!    encrypted `secret_enc` blobs are useless off this machine anyway (the
 //!    master key lives in the OS keychain / local key file, never in the
 //!    export), so a portable file must either drop secrets or re-key them.
-//!  * **Full** (`encrypted: true`) — the connections (incl. decrypted secrets)
+//!  * **Full** (`encrypted: true`) - the connections (incl. decrypted secrets)
 //!    are serialized and re-encrypted under a key derived from a user
 //!    passphrase (Argon2id → AES-256-GCM). This is the only correct way to
 //!    carry credentials to another machine.
@@ -29,6 +29,8 @@ const FORMAT_VERSION: u32 = 1;
 pub struct ExportConn {
     pub name: String,
     pub color: Option<String>,
+    #[serde(default = "crate::profiles::default_access")]
+    pub access: String,
     pub kind: ProfileKind,
     #[serde(default)]
     pub fields: ConnFields,
@@ -51,14 +53,14 @@ pub struct KdfParams {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportFile {
-    /// Format version — bumped if the shape changes.
+    /// Format version - bumped if the shape changes.
     pub ognom_export: u32,
     pub encrypted: bool,
     pub exported_at: String,
     /// Present when `!encrypted`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connections: Option<Vec<ExportConn>>,
-    /// Encryption envelope — present when `encrypted`.
+    /// Encryption envelope - present when `encrypted`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kdf: Option<KdfParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,7 +73,7 @@ pub struct ExportFile {
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
     pub encrypted: bool,
-    /// Number of connections — 0 for encrypted files (unknown until decrypted).
+    /// Number of connections - 0 for encrypted files (unknown until decrypted).
     pub count: u32,
     pub exported_at: Option<String>,
 }
@@ -205,7 +207,7 @@ pub fn parse_export(content: &str, passphrase: Option<&str>) -> AppResult<Vec<Ex
     let pass = passphrase
         .map(str::trim)
         .filter(|p| !p.is_empty())
-        .ok_or_else(|| AppError::Other("this export is encrypted — a passphrase is required".into()))?;
+        .ok_or_else(|| AppError::Other("this export is encrypted - a passphrase is required".into()))?;
     let kdf = file
         .kdf
         .ok_or_else(|| AppError::Other("encrypted export is missing its key parameters".into()))?;
@@ -238,6 +240,7 @@ mod tests {
         vec![ExportConn {
             name: "Prod".into(),
             color: None,
+            access: "production".into(),
             kind: ProfileKind::Uri,
             fields: ConnFields::default(),
             uri_summary: Some("mongodb+srv://u@c.mongodb.net".into()),

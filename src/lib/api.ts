@@ -37,10 +37,15 @@ export const emptyFields = (): ConnFields => ({
 
 export type ProfileKind = "fields" | "uri";
 
+/** Session access of a saved connection. Read-only and production open
+ *  without write access; the user switches to edit mode explicitly. */
+export type AccessMode = "readwrite" | "readonly" | "production";
+
 export interface ProfileInput {
   id?: string | null;
   name: string;
   color?: string | null;
+  access: AccessMode;
   kind: ProfileKind;
   fields: ConnFields;
   uri?: string | null;
@@ -51,6 +56,7 @@ export interface ProfileSummary {
   id: string;
   name: string;
   color?: string | null;
+  access: AccessMode;
   kind: ProfileKind;
   hostSummary: string;
   srv: boolean;
@@ -61,7 +67,7 @@ export interface ProfileSummary {
 }
 
 export interface ConnectionInfo {
-  /** Workspace id — pool key. Profile id for saved connections, `adhoc-N` otherwise. */
+  /** Workspace id - pool key. Profile id for saved connections, `adhoc-N` otherwise. */
   id: string;
   profileId?: string | null;
   name: string;
@@ -69,6 +75,8 @@ export interface ConnectionInfo {
   serverVersion: string;
   topology: string;
   latencyMs: number;
+  color?: string | null;
+  access: AccessMode;
 }
 
 export interface TestResult {
@@ -203,7 +211,7 @@ export interface DiffProgress {
 }
 
 export interface DiffEntry {
-  /** Document `_id` in extJSON form — pass back verbatim to syncDocuments. */
+  /** Document `_id` in extJSON form - pass back verbatim to syncDocuments. */
   id: unknown;
   source?: Doc | null;
   target?: Doc | null;
@@ -308,14 +316,67 @@ export interface ShellOutcome {
   appliedDefaultLimit: boolean;
 }
 
-export interface AiChatResult {
-  content: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
+/**
+ * Write guard. The connections store keeps this in sync with the active
+ * workspace's read-only state; every mutating call below checks it first so a
+ * read-only (or production) workspace can never write, whichever UI path the
+ * call came from. Cross-workspace operations pass the target workspace id.
+ */
+const readOnlyWorkspaces = new Set<string>();
+let activeWorkspace: string | null = null;
+
+export class ReadOnlyError extends Error {
+  constructor(name?: string) {
+    super(
+      name
+        ? `${name} is read-only. Switch to edit mode in the status bar to make changes.`
+        : "This workspace is read-only. Switch to edit mode in the status bar to make changes."
+    );
+    this.name = "ReadOnlyError";
+  }
 }
 
+const workspaceNames = new Map<string, string>();
+
+export const writeGuard = {
+  setActive(id: string | null) {
+    activeWorkspace = id;
+  },
+  setReadOnly(id: string, name: string, readOnly: boolean) {
+    workspaceNames.set(id, name);
+    if (readOnly) readOnlyWorkspaces.add(id);
+    else readOnlyWorkspaces.delete(id);
+  },
+  forget(id: string) {
+    readOnlyWorkspaces.delete(id);
+    workspaceNames.delete(id);
+  },
+  isReadOnly(id?: string | null): boolean {
+    const target = id ?? activeWorkspace;
+    return !!target && readOnlyWorkspaces.has(target);
+  },
+};
+
+/** Throw a ReadOnlyError when `workspace` (or the active one) is read-only. */
+function guard(workspace?: string | null): void {
+  const target = workspace ?? activeWorkspace;
+  if (target && readOnlyWorkspaces.has(target)) {
+    throw new ReadOnlyError(workspaceNames.get(target));
+  }
+}
+
+const w = <A extends unknown[], R>(fn: (...args: A) => Promise<R>, pick?: (...args: A) => string | null | undefined) =>
+  (...args: A): Promise<R> => {
+    try {
+      guard(pick?.(...args));
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return fn(...args);
+  };
+
 export const api = {
+  appEnv: () => invoke<string>("app_env"),
   // connections
   securityInfo: () => invoke<SecurityInfo>("security_info"),
   setSecretBackend: (backend: "keychain" | "file") =>
@@ -344,7 +405,7 @@ export const api = {
     invoke<ImportOutcome>("import_connections", { path, passphrase }),
   serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 
-  // metadata — pass a workspace id to read a non-active open connection
+  // metadata - pass a workspace id to read a non-active open connection
   listDatabases: (workspace?: string) => invoke<DbInfo[]>("list_databases", { workspace }),
   listCollections: (database: string, workspace?: string) =>
     invoke<CollInfo[]>("list_collections", { database, workspace }),
@@ -365,7 +426,7 @@ export const api = {
       collection,
       stages,
       allowDiskUse,
-      readOnly,
+      readOnly: readOnly ?? writeGuard.isReadOnly(),
     }),
   aggregateStageStats: (
     database: string,
@@ -374,48 +435,54 @@ export const api = {
     allowDiskUse: boolean
   ) =>
     invoke<StageStat[]>("aggregate_stage_stats", { database, collection, stages, allowDiskUse }),
-  insertDocument: (database: string, collection: string, docText: string) =>
-    invoke<{ insertedId: unknown }>("insert_document", { database, collection, docText }),
-  replaceDocument: (database: string, collection: string, id: unknown, docText: string) =>
+  insertDocument: w((database: string, collection: string, docText: string) =>
+    invoke<{ insertedId: unknown }>("insert_document", { database, collection, docText })),
+  replaceDocument: w((database: string, collection: string, id: unknown, docText: string) =>
     invoke<{ matched: number; modified: number }>("replace_document", {
       database,
       collection,
       id,
       docText,
-    }),
-  deleteDocument: (database: string, collection: string, id: unknown) =>
-    invoke<{ deleted: number }>("delete_document", { database, collection, id }),
+    })),
+  deleteDocument: w((database: string, collection: string, id: unknown) =>
+    invoke<{ deleted: number }>("delete_document", { database, collection, id })),
 
-  bulkUpdate: (database: string, collection: string, filter: string, update: string) =>
+  bulkUpdate: w((database: string, collection: string, filter: string, update: string) =>
     invoke<{ matched: number; modified: number; execMs: number }>("bulk_update", {
       database,
       collection,
       filter,
       update,
-    }),
-  bulkDelete: (database: string, collection: string, filter: string) =>
-    invoke<{ deleted: number; execMs: number }>("bulk_delete", { database, collection, filter }),
+    })),
+  bulkDelete: w((database: string, collection: string, filter: string) =>
+    invoke<{ deleted: number; execMs: number }>("bulk_delete", { database, collection, filter })),
 
   // collection operations
-  dropCollection: (database: string, collection: string) =>
-    invoke<void>("drop_collection", { database, collection }),
-  clearCollection: (database: string, collection: string) =>
-    invoke<number>("clear_collection", { database, collection }),
-  duplicateCollection: (database: string, source: string, target: string) =>
+  dropCollection: w((database: string, collection: string) =>
+    invoke<void>("drop_collection", { database, collection })),
+  clearCollection: w((database: string, collection: string) =>
+    invoke<number>("clear_collection", { database, collection })),
+  duplicateCollection: w((database: string, source: string, target: string) =>
     invoke<{ documents: number; indexes: number }>("duplicate_collection", {
       database,
       source,
       target,
-    }),
-  copyCollection: (req: CopyRequest) => invoke<CopyOutcome>("copy_collection", { req }),
+    })),
+  copyCollection: w(
+    (req: CopyRequest) => invoke<CopyOutcome>("copy_collection", { req }),
+    (req) => req.targetWorkspace
+  ),
   diffCollections: (req: DiffRequest) => invoke<DiffOutcome>("diff_collections", { req }),
-  syncDocuments: (req: SyncRequest) => invoke<number>("sync_documents", { req }),
+  syncDocuments: w(
+    (req: SyncRequest) => invoke<number>("sync_documents", { req }),
+    (req) => req.targetWorkspace
+  ),
   cancelJob: (jobId: string) => invoke<void>("cancel_job", { jobId }),
 
   // indexes & stats
   listIndexes: (database: string, collection: string) =>
     invoke<IndexInfo[]>("list_indexes", { database, collection }),
-  createIndex: (args: {
+  createIndex: w((args: {
     database: string;
     collection: string;
     keysText: string;
@@ -426,9 +493,9 @@ export const api = {
     hidden?: boolean;
     partialFilterText?: string;
     collationLocale?: string;
-  }) => invoke<string>("create_index", args),
-  dropIndex: (database: string, collection: string, name: string) =>
-    invoke<void>("drop_index", { database, collection, name }),
+  }) => invoke<string>("create_index", args)),
+  dropIndex: w((database: string, collection: string, name: string) =>
+    invoke<void>("drop_index", { database, collection, name })),
   collectionStats: (database: string, collection: string) =>
     invoke<CollectionStats>("collection_stats", { database, collection }),
 
@@ -456,26 +523,8 @@ export const api = {
     /** Enables `copy-progress` events and cancellation via cancelJob. */
     jobId?: string;
   }) => invoke<CopyOutcome>("export_collection", args),
-  importDocuments: (database: string, collection: string, path: string, jobId?: string) =>
-    invoke<CopyOutcome>("import_documents", { database, collection, path, jobId }),
-
-  // Ognom Studio
-  saveFile: (path: string, contentsBase64: string) =>
-    invoke<void>("save_file", { path, contentsBase64 }),
-  aiChat: (args: {
-    provider: string;
-    model: string;
-    system: string;
-    user: string;
-    jsonMode: boolean;
-    reasoning: boolean;
-    baseUrl?: string | null;
-  }) => invoke<AiChatResult>("ai_chat", args),
-  /** Store (or clear, with "") a provider's key in the encrypted vault.
-   *  Returns the providers that currently have a key. */
-  setAiKey: (provider: string, key: string) =>
-    invoke<string[]>("set_ai_key", { provider, key }),
-  aiKeyStatus: () => invoke<string[]>("ai_key_status"),
+  importDocuments: w((database: string, collection: string, path: string, jobId?: string) =>
+    invoke<CopyOutcome>("import_documents", { database, collection, path, jobId })),
 
   // schema relations
   dbRelations: (database: string) =>
@@ -487,16 +536,18 @@ export const api = {
 
   // ops panel
   currentOps: () => invoke<Doc[]>("current_ops"),
-  killOp: (opId: unknown) => invoke<void>("kill_op", { opId }),
+  killOp: w((opId: unknown) => invoke<void>("kill_op", { opId })),
   profilerStatus: (database: string) => invoke<Doc>("profiler_status", { database }),
-  setProfiler: (database: string, level: number, slowMs?: number) =>
-    invoke<Doc>("set_profiler", { database, level, slowMs }),
+  setProfiler: w((database: string, level: number, slowMs?: number) =>
+    invoke<Doc>("set_profiler", { database, level, slowMs })),
   profilerEntries: (database: string, limit?: number) =>
     invoke<Doc[]>("profiler_entries", { database, limit }),
   serverStatusLight: () => invoke<Doc>("server_status_light"),
 
   // shell
-  runShell: (database: string, text: string) => invoke<ShellOutcome>("run_shell", { database, text }),
+  /** Read-only workspaces pass `readOnly` so the backend rejects any write. */
+  runShell: (database: string, text: string) =>
+    invoke<ShellOutcome>("run_shell", { database, text, readOnly: writeGuard.isReadOnly() }),
 };
 
 /** Normalize a thrown invoke error (string or Error) to a message. */

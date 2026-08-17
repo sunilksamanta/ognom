@@ -1,13 +1,6 @@
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Copy, CopyPlus, Eye, FileX2, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Copy, CopyPlus, Eye, Pencil, Trash2 } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -17,13 +10,14 @@ import {
 } from "@/components/ui/context-menu";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CodeEditor } from "@/components/CodeEditor";
 import { ValueTree } from "@/components/explorer/ValueTree";
@@ -61,85 +55,8 @@ const copyText = async (text: string, label: string) => {
   toast.success(`${label} copied`);
 };
 
-function CopyMenu({ doc }: { doc: Doc }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6">
-          <Copy className="h-3 w-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => void copyText(toShellText(doc), "Document")}>
-          Copy Document
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void copyText(toPlainJson(doc), "Document")}>
-          Copy Document as JSON
-        </DropdownMenuItem>
-        {"_id" in doc && (
-          <DropdownMenuItem onClick={() => void copyText(toShellText(doc._id), "_id")}>
-            Copy _id
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function RowActions({ doc, actions, className }: { doc: Doc; actions: DocActions; className?: string }) {
-  const canMutate = "_id" in doc;
-  return (
-    <div className={cn("flex items-center gap-0.5", className)}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => actions.onView(doc)}>
-            <Eye className="h-3 w-3" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>View</TooltipContent>
-      </Tooltip>
-      <CopyMenu doc={doc} />
-      {actions.onEdit && canMutate && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => actions.onEdit!(doc)}>
-              <Pencil className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Edit</TooltipContent>
-        </Tooltip>
-      )}
-      {actions.onDuplicate && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => actions.onDuplicate!(doc)}>
-              <CopyPlus className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Duplicate</TooltipContent>
-        </Tooltip>
-      )}
-      {actions.onDelete && canMutate && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-destructive"
-              onClick={() => actions.onDelete!(doc)}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Delete</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// JSON view
+// shared context menu
 // ---------------------------------------------------------------------------
 
 function DocContextMenu({
@@ -155,55 +72,41 @@ function DocContextMenu({
 }) {
   const canMutate = "_id" in doc;
   return (
-    // `modal={false}`: every item here opens a Dialog (View/Edit/Duplicate) or
-    // AlertDialog (Delete). A modal menu sets `pointer-events: none` on <body>
-    // and only restores it after its exit animation; the dialog mounts its own
-    // layer before then, the two race over the shared body style, and the body
-    // is left permanently unclickable — the whole app "hangs". Non-modal menus
-    // never touch <body>, so the dialog (modal, self-contained) opens cleanly.
+    // modal={false}: items open dialogs; a modal menu would leave
+    // pointer-events stuck on <body> (see memory: radix-menu-dialog-freeze).
     <ContextMenu modal={false}>
       <ContextMenuTrigger asChild={asChild}>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => actions.onView(doc)}>
-          <Eye />
-          View
+          <Eye /> Open
         </ContextMenuItem>
         {actions.onEdit && canMutate && (
           <ContextMenuItem onSelect={() => actions.onEdit!(doc)}>
-            <Pencil />
-            Edit
+            <Pencil /> Edit
           </ContextMenuItem>
         )}
         {actions.onDuplicate && (
           <ContextMenuItem onSelect={() => actions.onDuplicate!(doc)}>
-            <CopyPlus />
-            Duplicate
+            <CopyPlus /> Duplicate
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void copyText(toShellText(doc), "Document")}>
-          <Copy />
-          Copy Document
+          <Copy /> Copy document
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void copyText(toPlainJson(doc), "Document")}>
-          <Copy />
-          Copy Document as JSON
+          <Copy /> Copy as JSON
         </ContextMenuItem>
         {"_id" in doc && (
           <ContextMenuItem onSelect={() => void copyText(toShellText(doc._id), "_id")}>
-            <Copy />
-            Copy _id
+            <Copy /> Copy _id
           </ContextMenuItem>
         )}
         {actions.onDelete && canMutate && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem
-              className="text-destructive focus:text-destructive"
-              onSelect={() => actions.onDelete!(doc)}
-            >
-              <Trash2 />
-              Delete
+            <ContextMenuItem className="text-danger focus:text-danger" onSelect={() => actions.onDelete!(doc)}>
+              <Trash2 /> Delete
             </ContextMenuItem>
           </>
         )}
@@ -212,29 +115,38 @@ function DocContextMenu({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Documents view (cards)
+// ---------------------------------------------------------------------------
+
 const DocCard = memo(function DocCard({
   doc,
   index,
   actions,
+  active,
 }: {
   doc: Doc;
   index: number;
   actions: DocActions;
+  active: boolean;
 }) {
   return (
     <DocContextMenu doc={doc} actions={actions} asChild>
-      <div className="group rounded-lg border bg-card transition-colors hover:border-border/80">
-        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-          <span className="text-[11px] tabular-nums text-muted-foreground/70">#{index + 1}</span>
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
-            {idLabel(doc)}
-          </span>
+      <div
+        className={cn(
+          "group rounded-[var(--r)] border bg-panel transition-colors",
+          active ? "border-accent-line shadow-[0_0_0_3px_var(--accent-soft)]" : "border-line hover:border-line-2"
+        )}
+        onDoubleClick={() => actions.onView(doc)}
+      >
+        <div
+          className="flex cursor-pointer items-center gap-2 border-b border-line px-3 py-1.5 font-mono text-[11px] text-text-3"
+          onClick={() => actions.onView(doc)}
+        >
+          <span className="tabular-nums">#{index + 1}</span>
+          <span className="truncate text-text-2">{idLabel(doc)}</span>
           <div className="flex-1" />
-          <RowActions
-            doc={doc}
-            actions={actions}
-            className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-          />
+          <span className="opacity-0 transition-opacity group-hover:opacity-100">open ›</span>
         </div>
         <div className="overflow-x-auto px-3 py-2">
           <ValueTree value={doc} />
@@ -249,94 +161,81 @@ const DocCard = memo(function DocCard({
 // ---------------------------------------------------------------------------
 
 const CELL_CLASS: Partial<Record<BsonKind, string>> = {
-  string: "text-bson-string",
-  number: "text-bson-number",
-  long: "text-bson-number",
-  double: "text-bson-number",
-  decimal: "text-bson-number",
-  boolean: "text-bson-boolean",
-  null: "text-bson-null italic",
-  objectId: "text-bson-oid",
-  uuid: "text-bson-oid",
-  date: "text-bson-date",
-  binary: "text-bson-date",
-  timestamp: "text-bson-date",
-  regex: "text-bson-string",
+  string: "st",
+  number: "nu",
+  long: "nu",
+  double: "nu",
+  decimal: "nu",
+  boolean: "bo",
+  null: "p italic",
+  objectId: "oi",
+  uuid: "oi",
+  date: "dt",
+  binary: "dt",
+  timestamp: "dt",
+  regex: "st",
+};
+
+const TYPE_ABBR: Partial<Record<BsonKind, string>> = {
+  string: "str",
+  number: "int",
+  long: "long",
+  double: "dbl",
+  decimal: "dec",
+  boolean: "bool",
+  null: "null",
+  objectId: "oid",
+  uuid: "uuid",
+  date: "date",
+  binary: "bin",
+  timestamp: "ts",
+  regex: "regex",
+  object: "obj",
+  array: "arr",
 };
 
 function Cell({ value }: { value: unknown }) {
   const kind = kindOf(value);
   if (kind === "object" || kind === "array") {
-    return (
-      <span className="rounded bg-muted/70 px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
-        {leafText(value)}
-      </span>
-    );
+    return <span className="p">{leafText(value)}</span>;
   }
   const text = leafText(value);
   return (
-    <span className={cn("block max-w-[280px] truncate", CELL_CLASS[kind])} title={text}>
+    <span className={cn("block max-w-[320px] truncate", CELL_CLASS[kind])} title={text}>
       {kind === "string" ? `"${text}"` : text}
     </span>
   );
 }
 
-function FieldValueDialog({
-  preview,
-  onClose,
-}: {
-  preview: FieldPreview | null;
-  onClose: () => void;
-}) {
-  const text = useMemo(
-    () => (preview ? toShellText(preview.value) : ""),
-    [preview],
-  );
+function FieldValueDialog({ preview, onClose }: { preview: FieldPreview | null; onClose: () => void }) {
+  const text = useMemo(() => (preview ? toShellText(preview.value) : ""), [preview]);
   const kind = preview ? kindOf(preview.value) : null;
   const summary =
     kind === "array"
-      ? `Array · ${(preview!.value as unknown[]).length} items`
+      ? `array · ${(preview!.value as unknown[]).length} items`
       : kind === "object"
-        ? `Object · ${Object.keys(preview!.value as object).length} fields`
-        : kind ?? "";
+        ? `object · ${Object.keys(preview!.value as object).length} fields`
+        : (kind ?? "");
 
   return (
     <Dialog open={!!preview} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-[640px]">
+      <DialogContent className="max-w-[640px]">
         <DialogHeader>
-          <DialogTitle className="font-mono text-sm">
-            {preview?.field ?? ""}
-          </DialogTitle>
-          <DialogDescription className="font-mono text-xs">
+          <DialogTitle className="font-mono text-[14px]">{preview?.field ?? ""}</DialogTitle>
+          <DialogDescription>
             {summary}
             {preview ? ` · ${preview.docLabel}` : ""}
           </DialogDescription>
         </DialogHeader>
-
-        {preview && (
-          <CodeEditor
-            value={text}
-            readOnly
-            height="50vh"
-            path={`dialog/field-preview/${preview.field}`}
-          />
-        )}
-
-        <DialogFooter className="gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              await navigator.clipboard.writeText(text);
-              toast.success("Field copied");
-            }}
-          >
-            <Copy className="h-3.5 w-3.5" />
+        <DialogBody>
+          {preview && <CodeEditor value={text} readOnly height="50vh" path={`dialog/field-preview/${preview.field}`} />}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => void copyText(text, "Field")}>
+            <Copy />
             Copy value
           </Button>
-          <Button size="sm" onClick={onClose}>
-            Close
-          </Button>
+          <Button onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -347,10 +246,12 @@ function TableView({
   docs,
   actions,
   selection,
+  activeKey,
 }: {
   docs: Doc[];
   actions: DocActions;
   selection?: DocSelection;
+  activeKey?: string | null;
 }) {
   const [preview, setPreview] = useState<FieldPreview | null>(null);
   const selectableKeys = useMemo(
@@ -358,32 +259,40 @@ function TableView({
     [docs]
   );
   const allSelected =
-    selection !== undefined &&
-    selectableKeys.length > 0 &&
-    selectableKeys.every((k) => selection.selected.has(k));
-  // Every field across the page becomes a column, ordered by how often it
-  // appears (then alphabetically). Row count is already capped by the page
-  // size, so the full column set stays cheap to render inside the scroller.
+    selection !== undefined && selectableKeys.length > 0 && selectableKeys.every((k) => selection.selected.has(k));
+
+  // Every field across the page becomes a column, ordered by frequency then
+  // name; the dominant BSON type of each column is shown in the header.
   const columns = useMemo(() => {
     const freq = new Map<string, number>();
+    const types = new Map<string, Map<BsonKind, number>>();
     for (const doc of docs) {
       for (const key of Object.keys(doc)) {
         freq.set(key, (freq.get(key) ?? 0) + 1);
+        const k = kindOf(doc[key]);
+        const m = types.get(key) ?? new Map<BsonKind, number>();
+        m.set(k, (m.get(k) ?? 0) + 1);
+        types.set(key, m);
       }
     }
     const keys = [...freq.keys()].filter((k) => k !== "_id");
     keys.sort((a, b) => freq.get(b)! - freq.get(a)! || a.localeCompare(b));
-    return freq.has("_id") ? ["_id", ...keys] : keys;
+    const ordered = freq.has("_id") ? ["_id", ...keys] : keys;
+    return ordered.map((name) => {
+      const m = types.get(name)!;
+      const top = [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      return { name, type: top ? TYPE_ABBR[top] ?? top : "" };
+    });
   }, [docs]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div className="tw">
       <FieldValueDialog preview={preview} onClose={() => setPreview(null)} />
-      <table className="w-full border-separate border-spacing-0 font-data">
-        <thead className="sticky top-0 z-10">
+      <table className="tbl">
+        <thead>
           <tr>
             {selection && (
-              <th className="w-8 border-b border-r bg-card px-2 py-1.5">
+              <th className="chk">
                 <Checkbox
                   checked={allSelected}
                   onCheckedChange={(v) => selection.onToggleAll(selectableKeys, v === true)}
@@ -393,80 +302,67 @@ function TableView({
               </th>
             )}
             {columns.map((col) => (
-              <th
-                key={col}
-                className="whitespace-nowrap border-b border-r bg-card px-2.5 py-1.5 text-left text-[11px] font-semibold text-muted-foreground last:border-r-0"
-              >
-                {col}
+              <th key={col.name}>
+                {col.name}
+                {col.type && <span className="ty">{col.type}</span>}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {docs.map((doc, i) => (
-            <DocContextMenu key={i} doc={doc} actions={actions} asChild>
-            <tr
-              onDoubleClick={() => actions.onView(doc)}
-              className={cn(
-                "group transition-colors odd:bg-muted/30 hover:bg-accent/60",
-                selection &&
-                  docSelectionKey(doc) !== null &&
-                  selection.selected.has(docSelectionKey(doc)!) &&
-                  "bg-primary/10 odd:bg-primary/10"
-              )}
-            >
-              {selection && (
-                <td
-                  className="w-8 border-b border-r border-border/60 px-2 py-1 align-top"
-                  onClick={(e) => e.stopPropagation()}
-                  onDoubleClick={(e) => e.stopPropagation()}
+          {docs.map((doc, i) => {
+            const key = docSelectionKey(doc);
+            const isSelected = !!selection && key !== null && selection.selected.has(key);
+            const isActive = !!activeKey && key === activeKey;
+            return (
+              <DocContextMenu key={i} doc={doc} actions={actions} asChild>
+                <tr
+                  onClick={() => actions.onView(doc)}
+                  className={cn((isSelected || isActive) && "on")}
                 >
-                  {docSelectionKey(doc) !== null && (
-                    <Checkbox
-                      checked={selection.selected.has(docSelectionKey(doc)!)}
-                      onCheckedChange={(v) =>
-                        selection.onToggle(docSelectionKey(doc)!, v === true)
-                      }
-                      aria-label="Select document"
-                      className="translate-y-px"
-                    />
+                  {selection && (
+                    <td
+                      className="chk"
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
+                      {key !== null && (
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(v) => selection.onToggle(key, v === true)}
+                          aria-label="Select document"
+                          className="translate-y-px"
+                        />
+                      )}
+                    </td>
                   )}
-                </td>
-              )}
-              {columns.map((col) => {
-                const present = col in doc;
-                const value = present ? doc[col] : undefined;
-                const kind = present ? kindOf(value) : null;
-                const expandable = kind === "object" || kind === "array";
-                return (
-                  <td
-                    key={col}
-                    onClick={
-                      expandable
-                        ? (e) => {
-                            e.stopPropagation();
-                            setPreview({ field: col, value, docLabel: `_id ${idLabel(doc)}` });
-                          }
-                        : undefined
-                    }
-                    title={expandable ? "Click to inspect field" : undefined}
-                    className={cn(
-                      "whitespace-nowrap border-b border-r border-border/60 px-2.5 py-1 align-top last:border-r-0",
-                      expandable && "cursor-pointer hover:bg-accent/40",
-                    )}
-                  >
-                    {present ? <Cell value={value} /> : <span className="text-muted-foreground/40">—</span>}
-                  </td>
-                );
-              })}
-              <td className="sticky right-0 w-0 border-b border-border/60 p-0">
-                <div className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 items-center rounded-l-md bg-accent/95 px-1 opacity-0 shadow-sm ring-1 ring-border/60 backdrop-blur-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
-                  <RowActions doc={doc} actions={actions} />
-                </div>
-              </td>
-            </tr>
-            </DocContextMenu>
-          ))}
+                  {columns.map((col) => {
+                    const present = col.name in doc;
+                    const value = present ? doc[col.name] : undefined;
+                    const kind = present ? kindOf(value) : null;
+                    const expandable = kind === "object" || kind === "array";
+                    return (
+                      <td
+                        key={col.name}
+                        onClick={
+                          expandable
+                            ? (e) => {
+                                e.stopPropagation();
+                                setPreview({ field: col.name, value, docLabel: `_id ${idLabel(doc)}` });
+                              }
+                            : undefined
+                        }
+                        title={expandable ? "Click to inspect field" : undefined}
+                        className={cn(expandable && "cursor-pointer")}
+                      >
+                        {present ? <Cell value={value} /> : <span className="p">-</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </DocContextMenu>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -482,6 +378,8 @@ interface ResultsViewerProps {
   emptyText?: string;
   /** Enables the checkbox column in table view. */
   selection?: DocSelection;
+  /** Selection key of the document open in the drawer (highlighted). */
+  activeKey?: string | null;
 }
 
 export const ResultsViewer = memo(function ResultsViewer({
@@ -490,25 +388,23 @@ export const ResultsViewer = memo(function ResultsViewer({
   actions,
   emptyText,
   selection,
+  activeKey,
 }: ResultsViewerProps) {
   if (docs.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-        <div className="no-select flex flex-col items-center gap-2 text-center">
-          <FileX2 className="h-8 w-8 opacity-40" />
-          <p className="text-sm">{emptyText ?? "No documents match"}</p>
-        </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center text-text-3">
+        <p className="no-select text-[12.5px]">{emptyText ?? "No documents match"}</p>
       </div>
     );
   }
 
-  if (view === "table") return <TableView docs={docs} actions={actions} selection={selection} />;
+  if (view === "table") return <TableView docs={docs} actions={actions} selection={selection} activeKey={activeKey} />;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex flex-col gap-2 p-3">
+      <div className="flex flex-col gap-2 p-[calc(var(--pad)-8px)]">
         {docs.map((doc, i) => (
-          <DocCard key={i} doc={doc} index={i} actions={actions} />
+          <DocCard key={i} doc={doc} index={i} actions={actions} active={!!activeKey && docSelectionKey(doc) === activeKey} />
         ))}
       </div>
     </div>

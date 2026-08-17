@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   api,
   errMsg,
+  writeGuard,
   type ConnectionInfo,
   type ProfileInput,
   type ProfileSummary,
@@ -13,12 +14,20 @@ import { useExplorer, type ExplorerSnapshot } from "@/stores/explorer";
 /** One open connection: its server metadata plus per-workspace UI mode. */
 export interface Workspace {
   info: ConnectionInfo; // info.id is the workspace key (pool key on the backend)
-  /** Terminator (Ognom Studio) mode is remembered per workspace. */
-  terminator: boolean;
+  /** Writes blocked. Read-only and production profiles start `true`; the user
+   *  flips it from the status bar for the rest of the session. */
+  readOnly: boolean;
 }
 
+/** Fresh workspace for a connection: read-only unless the profile is readwrite. */
+const newWorkspace = (info: ConnectionInfo): Workspace => {
+  const readOnly = info.access !== "readwrite";
+  writeGuard.setReadOnly(info.id, info.name, readOnly);
+  return { info, readOnly };
+};
+
 /** Persisted across restarts so open workspaces auto-reconnect on launch. Only
- *  saved profiles can be restored — ad-hoc connections have no stored secret. */
+ *  saved profiles can be restored - ad-hoc connections have no stored secret. */
 const SESSION_KEY = "ognom-sessions";
 interface SessionShape {
   /** Profile ids of the workspaces that were open, in order. */
@@ -36,7 +45,7 @@ interface ConnectionsState {
   workspaces: Workspace[];
   /** Workspace id of the active one. */
   activeId: string | null;
-  /** Active workspace's server info — mirror kept for status bar / dialogs. */
+  /** Active workspace's server info - mirror kept for status bar / dialogs. */
   active: ConnectionInfo | null;
   /** Profile id currently being connected (spinner targeting); `null` for ad-hoc. */
   connectingId: string | null;
@@ -54,7 +63,8 @@ interface ConnectionsState {
   switchTo: (id: string) => Promise<void>;
   disconnectWorkspace: (id: string) => Promise<void>;
   disconnectAll: () => Promise<void>;
-  setTerminator: (on: boolean) => void;
+  /** Toggle write access for one workspace (defaults to the active one). */
+  setReadOnly: (readOnly: boolean, id?: string) => void;
   restoreSessions: () => Promise<void>;
   setSecretBackend: (backend: "keychain" | "file") => Promise<void>;
 }
@@ -70,6 +80,7 @@ async function migrateLegacyLocalStorage(): Promise<number> {
       if (!item?.connectionString) continue;
       await api.saveConnection({
         name: item.name?.trim() || "Imported connection",
+        access: "readwrite",
         kind: "uri",
         uri: item.connectionString,
         fields: {
@@ -123,8 +134,9 @@ export const useConnections = create<ConnectionsState>((set, get) => {
   /** Add a freshly-established connection as a new workspace and activate it. */
   const adoptWorkspace = (info: ConnectionInfo) => {
     const cache = swapExplorer(info.id); // info.id is new → hydrates fresh
+    writeGuard.setActive(info.id);
     set((s) => ({
-      workspaces: [...s.workspaces, { info, terminator: false }],
+      workspaces: [...s.workspaces, newWorkspace(info)],
       activeId: info.id,
       active: info,
       status: "connected",
@@ -223,6 +235,7 @@ export const useConnections = create<ConnectionsState>((set, get) => {
         return;
       }
       const cache = swapExplorer(id);
+      writeGuard.setActive(id);
       set({ activeId: id, active: target.info, explorerCache: cache });
       persistSessions();
     },
@@ -238,6 +251,7 @@ export const useConnections = create<ConnectionsState>((set, get) => {
       const remaining = get().workspaces.filter((w) => w.info.id !== id);
       const cache = { ...get().explorerCache };
       delete cache[id];
+      writeGuard.forget(id);
 
       if (!wasActive) {
         set({ workspaces: remaining, explorerCache: cache });
@@ -245,7 +259,7 @@ export const useConnections = create<ConnectionsState>((set, get) => {
         return;
       }
 
-      // The active workspace was closed — fall back to a neighbour.
+      // The active workspace was closed - fall back to a neighbour.
       const neighbour = remaining[Math.min(idx, remaining.length - 1)] ?? null;
       if (neighbour) {
         try {
@@ -255,6 +269,7 @@ export const useConnections = create<ConnectionsState>((set, get) => {
         }
         explorer().hydrate(cache[neighbour.info.id] ?? null);
         delete cache[neighbour.info.id];
+        writeGuard.setActive(neighbour.info.id);
         set({
           workspaces: remaining,
           activeId: neighbour.info.id,
@@ -263,6 +278,7 @@ export const useConnections = create<ConnectionsState>((set, get) => {
         });
       } else {
         explorer().hydrate(null);
+        writeGuard.setActive(null);
         set({ workspaces: [], activeId: null, active: null, status: "idle", explorerCache: {} });
       }
       persistSessions();
@@ -273,17 +289,23 @@ export const useConnections = create<ConnectionsState>((set, get) => {
         await api.disconnect();
       } finally {
         explorer().hydrate(null);
+        for (const w of get().workspaces) writeGuard.forget(w.info.id);
+        writeGuard.setActive(null);
         set({ workspaces: [], activeId: null, active: null, status: "idle", explorerCache: {} });
         localStorage.removeItem(SESSION_KEY);
       }
     },
 
-    setTerminator: (on) =>
+    setReadOnly: (readOnly, id) => {
+      const target = id ?? get().activeId;
+      if (!target) return;
+      const ws = get().workspaces.find((w) => w.info.id === target);
+      if (!ws) return;
+      writeGuard.setReadOnly(target, ws.info.name, readOnly);
       set((s) => ({
-        workspaces: s.workspaces.map((w) =>
-          w.info.id === s.activeId ? { ...w, terminator: on } : w
-        ),
-      })),
+        workspaces: s.workspaces.map((w) => (w.info.id === target ? { ...w, readOnly } : w)),
+      }));
+    },
 
     restoreSessions: async () => {
       let saved: SessionShape | null = null;
@@ -303,9 +325,9 @@ export const useConnections = create<ConnectionsState>((set, get) => {
       for (const profileId of saved.profileIds) {
         try {
           const info = await api.connect(profileId);
-          restored.push({ info, terminator: false });
+          restored.push(newWorkspace(info));
         } catch {
-          // Profile deleted or server unreachable — skip it silently.
+          // Profile deleted or server unreachable - skip it silently.
         }
       }
       if (restored.length === 0) {
@@ -318,9 +340,10 @@ export const useConnections = create<ConnectionsState>((set, get) => {
       try {
         await api.switchWorkspace(activeWs.info.id);
       } catch {
-        // ignore — the last connect already left a valid active on the backend
+        // ignore - the last connect already left a valid active on the backend
       }
       explorer().hydrate(null); // active workspace mounts fresh and loads databases
+      writeGuard.setActive(activeWs.info.id);
       set({
         workspaces: restored,
         activeId: activeWs.info.id,

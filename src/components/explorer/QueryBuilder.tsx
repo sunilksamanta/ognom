@@ -1,6 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { ListFilter, Plus, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -144,7 +143,7 @@ export function buildFilter(rows: Row[], combinator: "and" | "or"): string {
   if (combinator === "or") {
     return `{ $or: [${clauses.map((c) => `{ ${c} }`).join(", ")}] }`;
   }
-  // AND: merge into one object, unless a field repeats — then use $and.
+  // AND: merge into one object, unless a field repeats - then use $and.
   const fields = rows.filter((r) => r.field.trim()).map((r) => r.field.trim());
   const hasDup = new Set(fields).size !== fields.length;
   if (hasDup) return `{ $and: [${clauses.map((c) => `{ ${c} }`).join(", ")}] }`;
@@ -190,22 +189,13 @@ export function QueryBuilder({
       </datalist>
 
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-sm font-medium">
+        <div className="flex items-center gap-1.5 text-[13px] font-medium">
           <ListFilter className="h-3.5 w-3.5 text-primary" />
           Query builder
         </div>
-        <div className="flex items-center rounded-md border bg-muted/60 p-0.5 text-[11px]">
+        <div className="seg">
           {(["and", "or"] as const).map((c) => (
-            <button
-              key={c}
-              onClick={() => setCombinator(c)}
-              className={cn(
-                "rounded-[5px] px-2 py-0.5 font-medium transition-colors",
-                combinator === c
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
+            <button key={c} onClick={() => setCombinator(c)} className={cn(combinator === c && "on")}>
               {c === "and" ? "Match ALL" : "Match ANY"}
             </button>
           ))}
@@ -216,7 +206,7 @@ export function QueryBuilder({
         {rows.map((row, i) => (
           <div key={row.id} className="space-y-1">
             {i > 0 && (
-              <p className="pl-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="lbl pl-1">
                 {combinator}
               </p>
             )}
@@ -242,15 +232,14 @@ export function QueryBuilder({
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+              <button
+                className="ico dgr shrink-0"
                 disabled={rows.length === 1}
                 onClick={() => setRows((rs) => rs.filter((r) => r.id !== row.id))}
+                aria-label="Remove condition"
               >
-                <X className="h-3.5 w-3.5" />
-              </Button>
+                <X />
+              </button>
             </div>
             {/* value row */}
             {!VALUELESS.includes(row.op) &&
@@ -276,7 +265,7 @@ export function QueryBuilder({
                     className="h-8 flex-1 font-mono text-xs"
                     spellCheck={false}
                   />
-                  <span className="text-xs text-muted-foreground">and</span>
+                  <span className="text-[11px] text-text-3">and</span>
                   <Input
                     value={row.value2}
                     onChange={(e) => update(row.id, { value2: e.target.value })}
@@ -300,33 +289,26 @@ export function QueryBuilder({
         ))}
       </div>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 text-xs text-muted-foreground"
-        onClick={() => setRows((rs) => [...rs, newRow()])}
-      >
-        <Plus className="h-3.5 w-3.5" />
+      <button className="btn qt sm" onClick={() => setRows((rs) => [...rs, newRow()])}>
+        <Plus />
         Add condition
-      </Button>
+      </button>
 
-      <div className="rounded-md border border-dashed bg-muted/40 px-2.5 py-1.5">
-        <code className="block break-all font-mono text-[11px] text-muted-foreground">
-          {preview}
-        </code>
+      <div className="notice mono">
+        <code className="block break-all">{preview}</code>
       </div>
 
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">
-          {fields.length > 0 ? `${fields.length} fields from latest 1000 docs` : "loading fields…"}
+        <span className="font-mono text-[10px] text-text-3">
+          {fields.length > 0 ? `${fields.length} fields from latest 1000 docs` : "loading fields..."}
         </span>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setRows([newRow()])}>
+          <button className="btn sm" onClick={() => setRows([newRow()])}>
             Clear
-          </Button>
-          <Button size="sm" onClick={() => onApply(preview)}>
+          </button>
+          <button className="btn pri sm" onClick={() => onApply(preview)}>
             Apply filter
-          </Button>
+          </button>
         </div>
       </div>
     </div>

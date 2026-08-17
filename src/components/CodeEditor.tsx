@@ -1,8 +1,8 @@
 import Editor, { OnMount } from "@monaco-editor/react";
 import { KeyCode, KeyMod } from "monaco-editor";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { ensureMonaco, MONO_FONT } from "@/lib/monaco";
+import { applyMonacoTheme, ensureMonaco, MONO_FONT } from "@/lib/monaco";
 import { useTheme } from "@/components/theme-provider";
 
 ensureMonaco();
@@ -10,7 +10,7 @@ ensureMonaco();
 interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
-  /** ⌘/Ctrl+Enter */
+  /** Cmd/Ctrl+Enter */
   onRun?: () => void;
   height?: string | number;
   className?: string;
@@ -18,6 +18,8 @@ interface CodeEditorProps {
   lineNumbers?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Borderless: the parent paints the surface (drawer JSON view, dock). */
+  bare?: boolean;
   /**
    * Stable, unique model identity. With many editors mounted at once (aggregate
    * stages, plus every open tab), giving each its own path keeps Monaco's
@@ -36,17 +38,23 @@ export function CodeEditor({
   lineNumbers = true,
   placeholder,
   autoFocus = false,
+  bare = false,
   path,
 }: CodeEditorProps) {
-  const { resolved } = useTheme();
+  const { theme, resolved } = useTheme();
   const runRef = useRef(onRun);
   runRef.current = onRun;
 
-  // NOTE: don't dispose the editor here — @monaco-editor/react owns the editor
+  // Re-derive the Monaco theme from the live tokens whenever the app theme
+  // flips. Tokens are applied to <html> synchronously by the provider, so by
+  // the time this effect runs getComputedStyle sees the new palette.
+  useEffect(() => {
+    applyMonacoTheme();
+  }, [theme, resolved]);
+
+  // NOTE: don't dispose the editor here - @monaco-editor/react owns the editor
   // (and model) lifecycle and disposes them on unmount. Disposing it ourselves
-  // double-disposes, so the library's later setModel/dispose hits a dead editor
-  // ("InstantiationService has been disposed") and blanks the app — this is what
-  // crashed when reordering aggregate stages.
+  // double-disposes and blanks the app.
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
   const handleMount: OnMount = (editor) => {
@@ -63,12 +71,18 @@ export function CodeEditor({
   };
 
   return (
-    <div className={cn("overflow-hidden rounded-md border bg-card", className)}>
+    <div
+      className={cn(
+        "overflow-hidden",
+        !bare && "rounded-[var(--r-sm)] border border-line bg-panel-2 focus-within:border-accent-line",
+        className
+      )}
+    >
       <Editor
         height={height}
         path={path}
         language="mongodb"
-        theme={resolved === "dark" ? "ognom-dark" : "ognom-light"}
+        theme="ognom"
         value={value}
         onChange={(v) => onChange?.(v ?? "")}
         onMount={handleMount}

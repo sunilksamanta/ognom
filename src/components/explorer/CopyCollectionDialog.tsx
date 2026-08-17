@@ -4,6 +4,7 @@ import { Loader2, Server } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -11,9 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CheckRow } from "@/components/ui/check-row";
 import {
   Select,
   SelectContent,
@@ -45,7 +44,6 @@ export function CopyCollectionDialog({
   const dbListId = useId();
   const nameId = useId();
   const filterId = useId();
-  const indexesId = useId();
 
   const workspaces = useConnections((s) => s.workspaces);
   const activeId = useConnections((s) => s.activeId);
@@ -116,7 +114,7 @@ export function CopyCollectionDialog({
       });
       if (outcome.canceled) {
         toast.info(
-          `Copy canceled — ${outcome.documents} document${outcome.documents === 1 ? "" : "s"} already copied to "${trimmedName}"`
+          `Copy canceled - ${outcome.documents} document${outcome.documents === 1 ? "" : "s"} already copied to "${trimmedName}"`
         );
       } else {
         const wsName = workspaces.find((w) => w.info.id === targetWs)?.info.name ?? "target";
@@ -150,33 +148,29 @@ export function CopyCollectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-[460px]">
+      <DialogContent className="max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>Copy collection to…</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              Copy <span className="font-mono font-medium text-foreground">{source}</span> to any
-              open connection — another server, database, or name. Streams in batches; large
-              collections are fine.
-            </div>
+          <DialogTitle>Copy collection to...</DialogTitle>
+          <DialogDescription>
+            {database}.{source} · to any open connection, streamed in batches
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-normal text-muted-foreground">Target connection</Label>
+        <DialogBody>
+          <div className="fld">
+            <label>Target connection</label>
             <Select value={targetWs} onValueChange={setTargetWs} disabled={busy}>
-              <SelectTrigger className="h-8">
+              <SelectTrigger className="font-sans">
                 <SelectValue placeholder="Pick an open connection" />
               </SelectTrigger>
               <SelectContent>
                 {workspaces.map((w) => (
                   <SelectItem key={w.info.id} value={w.info.id}>
-                    <span className="flex items-center gap-1.5">
-                      <Server className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="flex items-center gap-1.5 font-sans">
+                      <Server className="h-3.5 w-3.5 text-text-3" />
                       {w.info.name}
                       {w.info.id === activeId && (
-                        <span className="text-[10px] text-muted-foreground">(current)</span>
+                        <span className="font-mono text-[10px] text-text-3">(current)</span>
                       )}
                     </span>
                   </SelectItem>
@@ -185,20 +179,18 @@ export function CopyCollectionDialog({
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label htmlFor={dbListId} className="text-xs font-normal text-muted-foreground">
-                Target database
-              </Label>
-              <Input
+          <div className="two">
+            <div className="fld">
+              <label htmlFor={dbListId}>Target database</label>
+              <input
                 id={dbListId}
+                className="in"
                 list={`${dbListId}-list`}
                 value={targetDb}
                 onChange={(e) => setTargetDb(e.target.value)}
                 disabled={busy}
                 autoComplete="off"
                 spellCheck={false}
-                className="h-8 font-mono"
               />
               <datalist id={`${dbListId}-list`}>
                 {dbNames.map((n) => (
@@ -206,88 +198,80 @@ export function CopyCollectionDialog({
                 ))}
               </datalist>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={nameId} className="text-xs font-normal text-muted-foreground">
-                New collection name
-              </Label>
-              <Input
+            <div className="fld">
+              <label htmlFor={nameId}>New collection name</label>
+              <input
                 id={nameId}
+                className="in"
                 value={targetName}
                 onChange={(e) => setTargetName(e.target.value)}
                 disabled={busy}
                 autoComplete="off"
                 spellCheck={false}
-                className="h-8 font-mono"
               />
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor={filterId} className="text-xs font-normal text-muted-foreground">
-              Filter <span className="text-muted-foreground/60">(optional — copies matching documents only)</span>
-            </Label>
-            <Input
+          <div className="fld">
+            <label htmlFor={filterId}>Filter</label>
+            <input
               id={filterId}
+              className="in"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder='{ status: "active" }'
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
-              className="h-8 font-mono"
             />
+            <div className="hint">Optional, copies matching documents only.</div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id={indexesId}
-              checked={copyIndexes}
-              onCheckedChange={(v) => setCopyIndexes(v === true)}
-              disabled={busy}
-            />
-            <Label htmlFor={indexesId} className="text-xs font-normal">
-              Copy indexes
-            </Label>
-          </div>
+          <CheckRow on={copyIndexes} onChange={setCopyIndexes} disabled={busy}>
+            Copy indexes
+          </CheckRow>
 
           {sameTarget && (
-            <p className="text-xs text-destructive">
-              Source and target are the same collection — change the connection, database, or name.
-            </p>
+            <div className="notice dgr">
+              Source and target are the same collection - change the connection, database, or name.
+            </div>
           )}
 
           {busy && progress && (
-            <div className="space-y-1">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                {pct === null ? (
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-                ) : (
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width]"
-                    style={{ width: `${pct}%` }}
-                  />
-                )}
+            <div className="notice acc">
+              <Loader2 className="spin" />
+              <div className="min-w-0 flex-1">
+                <div className="mono tabular-nums">
+                  {progress.copied.toLocaleString()}
+                  {progress.total ? ` / ${progress.total.toLocaleString()}` : ""} documents copied
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+                  {pct === null ? (
+                    <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+                  ) : (
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  )}
+                </div>
               </div>
-              <p className="text-xs tabular-nums text-muted-foreground">
-                {progress.copied.toLocaleString()}
-                {progress.total ? ` / ${progress.total.toLocaleString()}` : ""} documents copied
-              </p>
             </div>
           )}
-        </div>
+        </DialogBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter>
           {busy ? (
-            <Button variant="outline" size="sm" onClick={cancel}>
+            <Button variant="outline" onClick={cancel}>
               Cancel copy
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close
             </Button>
           )}
-          <Button size="sm" disabled={!canCopy} onClick={() => void submit()}>
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Button disabled={!canCopy} onClick={() => void submit()}>
+            {busy && <Loader2 className="spin" />}
             Copy
           </Button>
         </DialogFooter>

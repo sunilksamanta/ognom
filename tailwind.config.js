@@ -1,5 +1,17 @@
 import animate from "tailwindcss-animate";
 
+/**
+ * Every colour is a theme-kit token. Opacity modifiers (`bg-primary/10`) are
+ * honoured through color-mix so utilities keep working on top of raw hex/rgba
+ * tokens without an HSL indirection.
+ */
+const tok = (name) => ({ opacityValue }) => {
+  // Without a modifier Tailwind passes `var(--tw-*-opacity)`; treat as opaque.
+  const n = Number(opacityValue);
+  if (opacityValue === undefined || Number.isNaN(n) || n >= 1) return `var(${name})`;
+  return `color-mix(in oklab, var(${name}) ${Math.round(n * 100)}%, transparent)`;
+};
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
@@ -7,75 +19,71 @@ export default {
   theme: {
     extend: {
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
-        },
-        secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
-        },
-        destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
-        },
-        muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
-        },
-        accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
-        },
-        popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
-        },
-        card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
-        },
-        warning: "hsl(var(--warning))",
-        info: "hsl(var(--info))",
+        // ---- raw tokens (preferred in new code) ----
+        chrome: tok("--chrome"),
+        bg: tok("--bg"),
+        panel: tok("--panel"),
+        "panel-2": tok("--panel-2"),
+        raised: tok("--raised"),
+        hover: tok("--hover"),
+        active: tok("--active"),
+        line: tok("--line"),
+        "line-2": tok("--line-2"),
+        text: tok("--text"),
+        "text-2": tok("--text-2"),
+        "text-3": tok("--text-3"),
+        "accent-soft": tok("--accent-soft"),
+        "accent-line": tok("--accent-line"),
+        "accent-ink": tok("--accent-ink"),
+        "accent-2": tok("--accent-2"),
+        ok: tok("--ok"),
+        warn: tok("--warn"),
+        danger: tok("--danger"),
+        // ---- semantic aliases (kept so existing components re-skin) ----
+        border: tok("--line"),
+        input: tok("--line-2"),
+        ring: tok("--accent-line"),
+        background: tok("--bg"),
+        foreground: tok("--text"),
+        primary: { DEFAULT: tok("--accent"), foreground: tok("--accent-ink") },
+        secondary: { DEFAULT: tok("--panel-2"), foreground: tok("--text") },
+        destructive: { DEFAULT: tok("--danger"), foreground: "#ffffff" },
+        muted: { DEFAULT: tok("--panel-2"), foreground: tok("--text-2") },
+        accent: { DEFAULT: tok("--hover"), foreground: tok("--text") },
+        popover: { DEFAULT: tok("--raised"), foreground: tok("--text") },
+        card: { DEFAULT: tok("--panel"), foreground: tok("--text") },
+        warning: tok("--warn"),
+        info: tok("--accent-2"),
         bson: {
-          key: "hsl(var(--bson-key))",
-          string: "hsl(var(--bson-string))",
-          number: "hsl(var(--bson-number))",
-          boolean: "hsl(var(--bson-boolean))",
-          null: "hsl(var(--bson-null))",
-          oid: "hsl(var(--bson-oid))",
-          date: "hsl(var(--bson-date))",
+          key: tok("--s-key"),
+          string: tok("--s-str"),
+          number: tok("--s-num"),
+          boolean: tok("--s-bool"),
+          null: tok("--s-punc"),
+          oid: tok("--s-oid"),
+          date: tok("--s-date"),
+          punc: tok("--s-punc"),
         },
       },
       fontFamily: {
-        sans: [
-          "Geist Sans",
-          "ui-sans-serif",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "sans-serif",
-        ],
-        mono: [
-          "Geist Mono",
-          "ui-monospace",
-          "SF Mono",
-          "JetBrains Mono",
-          "Cascadia Code",
-          "Menlo",
-          "Consolas",
-          "monospace",
-        ],
+        sans: ["var(--sans)"],
+        mono: ["var(--mono)"],
+        display: ["var(--display)"],
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        xs: "var(--r-xs)",
+        sm: "var(--r-sm)",
+        DEFAULT: "var(--r)",
+        md: "var(--r-sm)",
+        lg: "var(--r)",
+        xl: "var(--r-lg)",
+        "2xl": "var(--r-xl)",
+      },
+      boxShadow: {
+        panel: "var(--shadow)",
+      },
+      transitionTimingFunction: {
+        ease: "var(--ease)",
       },
     },
   },

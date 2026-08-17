@@ -29,8 +29,8 @@ describe("leafText", () => {
 
 describe("formatBytes", () => {
   it("handles missing values", () => {
-    expect(formatBytes(null)).toBe("—");
-    expect(formatBytes(undefined)).toBe("—");
+    expect(formatBytes(null)).toBe(" - ");
+    expect(formatBytes(undefined)).toBe(" - ");
   });
   it("uses bytes below 1 KiB and scales above", () => {
     expect(formatBytes(512)).toBe("512 B");
@@ -42,6 +42,6 @@ describe("formatBytes", () => {
 describe("formatCount", () => {
   it("adds thousands separators", () => {
     expect(formatCount(1234567)).toBe("1,234,567");
-    expect(formatCount(null)).toBe("—");
+    expect(formatCount(null)).toBe(" - ");
   });
 });

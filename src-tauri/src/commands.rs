@@ -23,7 +23,7 @@ pub struct PooledConn {
 }
 
 /// All connections the user has open at once. Switching workspaces just
-/// re-points `active` — the clients stay alive, so the pool stays warm and the
+/// re-points `active` - the clients stay alive, so the pool stays warm and the
 /// switch is instant (no reconnect).
 #[derive(Default)]
 pub struct Sessions {
@@ -117,7 +117,7 @@ async fn client_for(state: &State<'_, AppState>, workspace: Option<&str>) -> App
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
-    /// Workspace id — the pool key. Profile id for saved connections, a
+    /// Workspace id - the pool key. Profile id for saved connections, a
     /// generated `adhoc-N` for unsaved ones.
     pub id: String,
     pub profile_id: Option<String>,
@@ -126,6 +126,10 @@ pub struct ConnectionInfo {
     pub server_version: String,
     pub topology: String,
     pub latency_ms: u64,
+    /// Colour tag of the saved profile (rail tile).
+    pub color: Option<String>,
+    /// "readwrite" | "readonly" | "production" - drives the default write guard.
+    pub access: String,
 }
 
 #[derive(Serialize)]
@@ -211,8 +215,27 @@ async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppRe
         server_version,
         topology,
         latency_ms,
+        color: None,
+        access: crate::profiles::default_access(),
     };
     Ok((client, info))
+}
+
+/// "macOS · arm64" style environment line for the empty-pane version block.
+#[tauri::command]
+pub fn app_env() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => other,
+    };
+    format!("{os} · {arch}")
 }
 
 #[tauri::command]
@@ -307,14 +330,21 @@ pub async fn test_connection(
 
 #[tauri::command]
 pub async fn connect(profile_id: String, state: State<'_, AppState>) -> AppResult<ConnectionInfo> {
-    let (uri, name) = {
+    let (uri, name, color, access) = {
         let crypto = state.crypto();
         let store = state.store.lock().unwrap();
         let profile = store.get(&profile_id)?;
-        (store.uri_for(&profile_id, &crypto)?, profile.name.clone())
+        (
+            store.uri_for(&profile_id, &crypto)?,
+            profile.name.clone(),
+            profile.color.clone(),
+            profile.access.clone(),
+        )
     };
     let (client, mut info) = establish(&uri, name, Some(profile_id.clone())).await?;
     info.id = profile_id.clone();
+    info.color = color;
+    info.access = access;
     {
         let mut s = state.sessions.lock().await;
         s.pool
@@ -338,6 +368,8 @@ pub async fn connect_input(
     );
     let (client, mut info) = establish(&uri, name, None).await?;
     info.id = id.clone();
+    info.color = input.color.clone();
+    info.access = input.access.clone();
     {
         let mut s = state.sessions.lock().await;
         s.pool.insert(id.clone(), PooledConn { client, info: info.clone() });
@@ -346,7 +378,7 @@ pub async fn connect_input(
     Ok(info)
 }
 
-/// Make an already-open workspace the active one. Instant — the client is
+/// Make an already-open workspace the active one. Instant - the client is
 /// already alive in the pool, so this only re-points `active`.
 #[tauri::command]
 pub async fn switch_workspace(id: String, state: State<'_, AppState>) -> AppResult<ConnectionInfo> {
@@ -380,7 +412,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
-/// The connection URI for a saved profile — with or without the password.
+/// The connection URI for a saved profile - with or without the password.
 #[tauri::command]
 pub fn connection_uri(
     profile_id: String,
@@ -445,7 +477,7 @@ pub fn import_connections(
 }
 
 /// Detailed server diagnostics for the status-bar info dialog. Each admin
-/// command degrades independently — Atlas and other locked-down deployments
+/// command degrades independently - Atlas and other locked-down deployments
 /// forbid some of these (hostInfo, serverStatus), so those sections come back
 /// `null` and the UI simply hides them.
 #[tauri::command]
@@ -637,15 +669,14 @@ pub async fn aggregate_collection(
     let client = current_client(&state).await?;
     let coll = client.database(&database).collection::<Document>(&collection);
 
-    // Hard gate for Studio: AI-generated pipelines must never write. Enforced
-    // here, not just in the prompt — a $out/$merge that slips past the model's
-    // instructions is rejected before it reaches the server.
+    // Read-only workspaces: a $out/$merge stage writes, so it is rejected
+    // before it reaches the server.
     if read_only.unwrap_or(false) {
         for stage in &stages {
             let op = stage.op.trim().to_lowercase();
             if op == "$out" || op == "$merge" {
                 return Err(AppError::Other(format!(
-                    "blocked: {} writes data — Studio queries are read-only",
+                    "{} is blocked: this workspace is read-only. Switch to edit mode to run writes.",
                     stage.op
                 )));
             }
@@ -728,7 +759,7 @@ pub async fn delete_document(
 // collection operations
 // ---------------------------------------------------------------------------
 
-/// Drop a collection (or view) entirely — documents, indexes and all.
+/// Drop a collection (or view) entirely - documents, indexes and all.
 #[tauri::command]
 pub async fn drop_collection(
     database: String,
@@ -744,7 +775,7 @@ pub async fn drop_collection(
     Ok(())
 }
 
-/// Empty a collection — delete every document but keep the collection and its
+/// Empty a collection - delete every document but keep the collection and its
 /// indexes. Returns how many documents were removed.
 #[tauri::command]
 pub async fn clear_collection(
@@ -788,13 +819,13 @@ pub async fn duplicate_collection(
     let src = db.collection::<Document>(&source);
     let _: Vec<Document> = src.aggregate(vec![doc! {"$out": &target}]).await?.try_collect().await?;
 
-    // `$out` skips the target when the source is empty — make sure it exists.
+    // `$out` skips the target when the source is empty - make sure it exists.
     let after: Vec<String> = db.list_collection_names().await?;
     if !after.iter().any(|n| *n == target) {
         db.create_collection(&target).await?;
     }
 
-    // `$out` copies documents but not secondary indexes — recreate them. A view
+    // `$out` copies documents but not secondary indexes - recreate them. A view
     // has no listable indexes, so fall back to none rather than failing.
     let dst = db.collection::<Document>(&target);
     let models: Vec<IndexModel> = match src.list_indexes().await {
@@ -903,7 +934,7 @@ pub async fn db_relations(database: String, state: State<'_, AppState>) -> AppRe
             .await
         {
             Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
-            Err(_) => Vec::new(), // views can't $sample — node stays edge-less
+            Err(_) => Vec::new(), // views can't $sample - node stays edge-less
         };
 
         let mut fields: Vec<String> = Vec::new();
@@ -958,7 +989,7 @@ pub async fn db_relations(database: String, state: State<'_, AppState>) -> AppRe
 }
 
 // ---------------------------------------------------------------------------
-// ops panel — currentOp / profiler / live server stats
+// ops panel - currentOp / profiler / live server stats
 // ---------------------------------------------------------------------------
 
 /// In-flight operations via the `currentOp` admin command (idle connections
@@ -986,7 +1017,7 @@ pub async fn current_ops(state: State<'_, AppState>) -> AppResult<Vec<Value>> {
 }
 
 /// Kill one in-flight operation. `op_id` is numeric on standalone/replica
-/// deployments and a string on sharded clusters — accept either.
+/// deployments and a string on sharded clusters - accept either.
 #[tauri::command]
 pub async fn kill_op(op_id: Value, state: State<'_, AppState>) -> AppResult<()> {
     let client = current_client(&state).await?;
@@ -1050,7 +1081,7 @@ pub async fn profiler_entries(
 }
 
 /// Light serverStatus slice for live polling: opcounters, connections,
-/// memory, network, uptime. Small on purpose — this gets called every
+/// memory, network, uptime. Small on purpose - this gets called every
 /// couple of seconds while the Live tab is open.
 #[tauri::command]
 pub async fn server_status_light(state: State<'_, AppState>) -> AppResult<Value> {
@@ -1075,8 +1106,8 @@ pub async fn server_status_light(state: State<'_, AppState>) -> AppResult<Value>
 // bulk operations
 // ---------------------------------------------------------------------------
 
-/// Apply an operator update ({$set: …}, {$unset: …}, …) to every document
-/// matching the filter. Plain replacement documents are rejected — a bulk
+/// Apply an operator update ({$set: ...}, {$unset: ...}, ...) to every document
+/// matching the filter. Plain replacement documents are rejected - a bulk
 /// replace of N documents with the same body is almost never intended.
 #[tauri::command]
 pub async fn bulk_update(
@@ -1096,7 +1127,7 @@ pub async fn bulk_update(
     }
     if !update_doc.keys().all(|k| k.starts_with('$')) {
         return Err(AppError::Parse(
-            "bulk update requires operator syntax ({ $set: … }, { $unset: … }, …)".into(),
+            "bulk update requires operator syntax ({ $set: ... }, { $unset: ... }, ...)".into(),
         ));
     }
 
@@ -1109,7 +1140,7 @@ pub async fn bulk_update(
     }))
 }
 
-/// Delete every document matching the filter. An empty filter is refused —
+/// Delete every document matching the filter. An empty filter is refused - 
 /// "Clear collection" is the explicit tool for wiping everything.
 #[tauri::command]
 pub async fn bulk_delete(
@@ -1124,7 +1155,7 @@ pub async fn bulk_delete(
     let filter = parse_doc_text(&filter)?;
     if filter.is_empty() {
         return Err(AppError::Parse(
-            "bulk delete needs a filter — use Clear Collection to remove every document".into(),
+            "bulk delete needs a filter - use Clear Collection to remove every document".into(),
         ));
     }
 
@@ -1153,7 +1184,7 @@ pub struct StageStat {
 /// Profile a pipeline stage-by-stage: for each prefix run
 /// `[stage1..stageN, {$count}]` and report the surviving document count and
 /// cumulative time. This is how "stage 3 dropped 98% of the docs and took
-/// 2 s" gets surfaced in the builder. Write stages are refused — profiling
+/// 2 s" gets surfaced in the builder. Write stages are refused - profiling
 /// must never mutate data.
 #[tauri::command]
 pub async fn aggregate_stage_stats(
@@ -1171,7 +1202,7 @@ pub async fn aggregate_stage_stats(
         let op = stage.op.trim();
         if op.eq_ignore_ascii_case("$out") || op.eq_ignore_ascii_case("$merge") {
             return Err(AppError::Other(
-                "stage profiling skips $out/$merge — remove the write stage to analyze".into(),
+                "stage profiling skips $out/$merge - remove the write stage to analyze".into(),
             ));
         }
         let body = shell::parse_value(&stage.body)
@@ -1227,7 +1258,7 @@ pub struct CopyRequest {
     pub source_workspace: Option<String>,
     pub source_database: String,
     pub source_collection: String,
-    /// Target workspace id — may equal the source for same-server copies.
+    /// Target workspace id - may equal the source for same-server copies.
     pub target_workspace: String,
     pub target_database: String,
     pub target_collection: String,
@@ -1257,7 +1288,7 @@ pub struct CopyOutcome {
 }
 
 /// Copy a collection between any two open workspaces (or within one), batched
-/// and streaming — documents round-trip through the app in chunks of
+/// and streaming - documents round-trip through the app in chunks of
 /// [`COPY_BATCH`], never all at once. Emits `copy-progress` events and honors
 /// cancellation via [`cancel_job`]. Refuses to overwrite an existing target.
 #[tauri::command]
@@ -1283,7 +1314,7 @@ pub async fn copy_collection(
     // Copying a collection onto itself would read and write the same data.
     let same_workspace = match &req.source_workspace {
         Some(id) => *id == req.target_workspace,
-        // Source defaulted to the active workspace — resolve it to compare.
+        // Source defaulted to the active workspace - resolve it to compare.
         None => {
             let s = state.sessions.lock().await;
             s.active.as_deref() == Some(req.target_workspace.as_str())
@@ -1357,7 +1388,7 @@ pub async fn copy_collection(
         }
     }
 
-    // An empty source never triggers an insert — make sure the target exists
+    // An empty source never triggers an insert - make sure the target exists
     // so the copy is visible in the target's collection list.
     if documents == 0 && !canceled {
         let after: Vec<String> = dst_db.list_collection_names().await?;
@@ -1420,7 +1451,7 @@ async fn run_copy(
     Ok((copied, canceled))
 }
 
-/// Flag an in-flight job (copy, diff, …) for cancellation. The job stops at
+/// Flag an in-flight job (copy, diff, ...) for cancellation. The job stops at
 /// its next batch boundary; work already applied stays.
 #[tauri::command]
 pub async fn cancel_job(job_id: String, state: State<'_, AppState>) -> AppResult<()> {
@@ -1563,7 +1594,7 @@ async fn run_diff(
         );
     };
 
-    // Pass 1 — walk the source; look up each batch on the target by `_id`.
+    // Pass 1 - walk the source; look up each batch on the target by `_id`.
     let mut cursor = src.find(filter.clone()).await?;
     let mut batch: Vec<Document> = Vec::with_capacity(DIFF_BATCH);
     let mut processed: u64 = 0;
@@ -1637,7 +1668,7 @@ async fn run_diff(
         emit("source", processed, src_total);
     }
 
-    // Pass 2 — walk the target; anything whose `_id` is absent on the source
+    // Pass 2 - walk the target; anything whose `_id` is absent on the source
     // side is target-only. Changed/identical were already settled in pass 1.
     let mut cursor = dst.find(filter).await?;
     let mut batch: Vec<Document> = Vec::with_capacity(DIFF_BATCH);
@@ -1748,7 +1779,7 @@ pub async fn sync_documents(req: SyncRequest, state: State<'_, AppState>) -> App
                     applied += if r.modified_count > 0 || r.upserted_id.is_some() {
                         1
                     } else {
-                        // Matched but unmodified — already in sync; count it.
+                        // Matched but unmodified - already in sync; count it.
                         r.matched_count
                     };
                 }
@@ -1798,7 +1829,7 @@ pub async fn list_indexes(
     let models: Vec<IndexModel> = coll.list_indexes().await?.try_collect().await?;
 
     // Usage stats power "unused index" detection. Best-effort: $indexStats is
-    // unavailable on views and restricted deployments — degrade to None.
+    // unavailable on views and restricted deployments - degrade to None.
     let mut usage: std::collections::HashMap<String, (i64, Option<String>)> =
         std::collections::HashMap::new();
     if let Ok(cursor) = coll.aggregate(vec![doc! {"$indexStats": {}}]).await {
@@ -1866,7 +1897,7 @@ pub async fn create_index(
         return Err(AppError::Parse("index keys are required, e.g. { email: 1 }".into()));
     }
 
-    // Optional partial filter expression — only indexes documents matching it.
+    // Optional partial filter expression - only indexes documents matching it.
     let partial_filter = match partial_filter_text {
         Some(ref t) if !t.trim().is_empty() => {
             let d = parse_doc_text(t)?;
@@ -2034,7 +2065,7 @@ fn suggest_index(filter: &Document, sort: &Document) -> Option<Document> {
     let mut range: Vec<String> = Vec::new();
     for (k, v) in filter {
         if k.starts_with('$') {
-            continue; // $or / $and / $expr — too shape-dependent to suggest from
+            continue; // $or / $and / $expr - too shape-dependent to suggest from
         }
         let is_range =
             matches!(v, Bson::Document(d) if d.keys().any(|op| op.starts_with('$')));
@@ -2318,7 +2349,7 @@ pub async fn export_collection(
     };
 
     // CSV needs a column set before the first row. Buffer an initial window to
-    // discover the key union, then stream the rest against those columns —
+    // discover the key union, then stream the rest against those columns - 
     // memory stays flat no matter how large the collection is.
     let mut count: u64 = 0;
     let mut canceled = false;
@@ -2646,7 +2677,7 @@ async fn run_import(
             flush!();
         }
         _ => {
-            // .json — array or NDJSON body, sniffed like before. The array
+            // .json - array or NDJSON body, sniffed like before. The array
             // form needs a full parse; NDJSON content streams line-by-line.
             let text = std::fs::read_to_string(path)
                 .map_err(|e| AppError::Parse(format!("cannot read {path}: {e}")))?;
@@ -2768,282 +2799,6 @@ fn csv_cell_to_bson(key: &str, cell: &str) -> Bson {
     Bson::String(cell.to_string())
 }
 
-/// Write arbitrary (base64-encoded) bytes to a user-chosen path. Used by
-/// Studio exports (chart PNGs, result JSON/CSV).
-#[tauri::command]
-pub async fn save_file(path: String, contents_base64: String) -> AppResult<()> {
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(contents_base64.as_bytes())
-        .map_err(|e| AppError::Parse(format!("invalid file payload: {e}")))?;
-    std::fs::write(&path, bytes).map_err(|e| AppError::Parse(format!("cannot write {path}: {e}")))?;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Ognom Studio — AI chat proxy
-// ---------------------------------------------------------------------------
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiChatResult {
-    pub content: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
-}
-
-const AI_PROVIDERS: &[&str] = &["openai", "anthropic", "ollama", "lmstudio", "custom"];
-
-fn ai_keys_path(state: &AppState) -> std::path::PathBuf {
-    state.data_dir.join("ai_keys.json")
-}
-
-/// provider → encrypted key payload. Same AES-256-GCM vault as connection
-/// secrets, so an AI key is protected exactly like a database password.
-fn load_ai_keys(state: &AppState) -> std::collections::HashMap<String, String> {
-    std::fs::read_to_string(ai_keys_path(state))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn stored_ai_key(state: &AppState, provider: &str) -> Option<String> {
-    let keys = load_ai_keys(state);
-    let payload = keys.get(provider)?;
-    state.crypto().decrypt(payload).ok().filter(|k| !k.trim().is_empty())
-}
-
-/// Store (or clear, with an empty key) a provider's API key in the encrypted
-/// vault. Returns the providers that currently have a key.
-#[tauri::command]
-pub fn set_ai_key(
-    provider: String,
-    key: String,
-    state: State<'_, AppState>,
-) -> AppResult<Vec<String>> {
-    if !AI_PROVIDERS.contains(&provider.as_str()) {
-        return Err(AppError::Parse(format!("unknown AI provider '{provider}'")));
-    }
-    let mut keys = load_ai_keys(&state);
-    let key = key.trim();
-    if key.is_empty() {
-        keys.remove(&provider);
-    } else {
-        keys.insert(provider, state.crypto().encrypt(key)?);
-    }
-    let json = serde_json::to_string_pretty(&keys)
-        .map_err(|e| AppError::Storage(format!("could not serialize AI keys: {e}")))?;
-    std::fs::write(ai_keys_path(&state), json)
-        .map_err(|e| AppError::Storage(format!("could not write AI keys: {e}")))?;
-    let mut have: Vec<String> = keys.into_keys().collect();
-    have.sort();
-    Ok(have)
-}
-
-/// Which providers have a key stored. The key itself never leaves the backend.
-#[tauri::command]
-pub fn ai_key_status(state: State<'_, AppState>) -> AppResult<Vec<String>> {
-    let mut have: Vec<String> = load_ai_keys(&state).into_keys().collect();
-    have.sort();
-    Ok(have)
-}
-
-fn provider_label(provider: &str) -> &'static str {
-    match provider {
-        "openai" => "OpenAI",
-        "anthropic" => "Anthropic",
-        "ollama" => "Ollama",
-        "lmstudio" => "LM Studio",
-        _ => "AI provider",
-    }
-}
-
-/// Proxy a chat completion to the configured AI provider from the backend
-/// (no CORS, and the key never enters the webview's network layer). OpenAI,
-/// Ollama, LM Studio, and custom endpoints speak the OpenAI-compatible
-/// chat-completions API; Anthropic uses its native Messages API. Returns the
-/// assistant message text plus token usage.
-#[tauri::command]
-pub async fn ai_chat(
-    provider: String,
-    model: String,
-    system: String,
-    user: String,
-    json_mode: bool,
-    reasoning: bool,
-    base_url: Option<String>,
-    state: State<'_, AppState>,
-) -> AppResult<AiChatResult> {
-    let label = provider_label(&provider);
-    let key = stored_ai_key(&state, &provider);
-    // Cloud providers need a key; local/custom endpoints usually don't.
-    if key.is_none() && matches!(provider.as_str(), "openai" | "anthropic") {
-        return Err(AppError::Parse(format!(
-            "{label} API key is not set — add it in Settings → Prompts & AI"
-        )));
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::Parse(format!("http client: {e}")))?;
-
-    if provider == "anthropic" {
-        return anthropic_chat(&client, &key.unwrap(), &model, &system, &user, reasoning).await;
-    }
-
-    // ---- OpenAI-compatible path (openai / ollama / lmstudio / custom) -----
-    let base = base_url
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| match provider.as_str() {
-            "ollama" => "http://localhost:11434/v1".into(),
-            "lmstudio" => "http://localhost:1234/v1".into(),
-            _ => "https://api.openai.com/v1".into(),
-        });
-    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
-
-    let mut body = json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user },
-        ],
-    });
-    // Local servers vary in which OpenAI extensions they accept — only send
-    // OpenAI-specific fields to OpenAI itself (and response_format to custom
-    // endpoints, which are usually cloud-compatible).
-    if json_mode && matches!(provider.as_str(), "openai" | "custom") {
-        body["response_format"] = json!({ "type": "json_object" });
-    }
-    if provider == "openai" {
-        // Same model in both modes — Deep Think just reasons harder. "none"
-        // keeps Normal fast. (gpt-5.4 supports none/low/medium/high/xhigh.)
-        body["reasoning_effort"] = json!(if reasoning { "high" } else { "none" });
-    }
-
-    let mut req = client.post(&url).json(&body);
-    if let Some(k) = key {
-        req = req.bearer_auth(k);
-    }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| AppError::Parse(format!("{label} request failed: {e}")))?;
-
-    let status = resp.status();
-    let payload: Value = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Parse(format!("{label} response unreadable: {e}")))?;
-
-    if !status.is_success() {
-        let msg = payload
-            .pointer("/error/message")
-            .and_then(|v| v.as_str())
-            .or_else(|| payload.pointer("/error").and_then(|v| v.as_str()))
-            .unwrap_or("unknown error");
-        return Err(AppError::Parse(format!("{label} ({status}): {msg}")));
-    }
-
-    let content = payload
-        .pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| AppError::Parse(format!("{label} returned an empty response")))?;
-
-    let usage = |key: &str| payload.pointer(&format!("/usage/{key}")).and_then(|v| v.as_u64()).unwrap_or(0);
-    Ok(AiChatResult {
-        content,
-        input_tokens: usage("prompt_tokens"),
-        output_tokens: usage("completion_tokens"),
-        total_tokens: usage("total_tokens"),
-    })
-}
-
-/// Anthropic Messages API. System prompt is a top-level field; thinking is
-/// adaptive by default on current models, so Deep Think maps to a higher
-/// `output_config.effort` instead of a separate reasoning switch.
-async fn anthropic_chat(
-    client: &reqwest::Client,
-    api_key: &str,
-    model: &str,
-    system: &str,
-    user: &str,
-    reasoning: bool,
-) -> AppResult<AiChatResult> {
-    let mut body = json!({
-        "model": model,
-        "max_tokens": 16000,
-        "system": system,
-        "messages": [ { "role": "user", "content": user } ],
-    });
-    // `effort` is unsupported on claude-haiku-4-5 / claude-sonnet-4-5 —
-    // sending it there would 400. Those models just run at their default.
-    if !model.contains("haiku") && !model.contains("sonnet-4-5") {
-        body["output_config"] = json!({ "effort": if reasoning { "high" } else { "low" } });
-    }
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| AppError::Parse(format!("Anthropic request failed: {e}")))?;
-
-    let status = resp.status();
-    let payload: Value = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Parse(format!("Anthropic response unreadable: {e}")))?;
-
-    if !status.is_success() {
-        let msg = payload
-            .pointer("/error/message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown error");
-        return Err(AppError::Parse(format!("Anthropic ({status}): {msg}")));
-    }
-
-    if payload.pointer("/stop_reason").and_then(|v| v.as_str()) == Some("refusal") {
-        return Err(AppError::Parse(
-            "Anthropic declined this request (safety classifier) — try rephrasing".into(),
-        ));
-    }
-
-    // Content is an array of blocks; the answer is the first non-empty text
-    // block (thinking blocks may precede it).
-    let content = payload
-        .pointer("/content")
-        .and_then(|v| v.as_array())
-        .and_then(|blocks| {
-            blocks.iter().find_map(|b| {
-                if b.pointer("/type").and_then(|t| t.as_str()) == Some("text") {
-                    b.pointer("/text")
-                        .and_then(|t| t.as_str())
-                        .filter(|s| !s.trim().is_empty())
-                        .map(str::to_string)
-                } else {
-                    None
-                }
-            })
-        })
-        .ok_or_else(|| AppError::Parse("Anthropic returned an empty response".into()))?;
-
-    let usage = |key: &str| payload.pointer(&format!("/usage/{key}")).and_then(|v| v.as_u64()).unwrap_or(0);
-    let input = usage("input_tokens");
-    let output = usage("output_tokens");
-    Ok(AiChatResult {
-        content,
-        input_tokens: input,
-        output_tokens: output,
-        total_tokens: input + output,
-    })
-}
-
 // ---------------------------------------------------------------------------
 // shell execution
 // ---------------------------------------------------------------------------
@@ -3114,9 +2869,17 @@ fn opt_bool(args: &[Value], idx: usize, key: &str) -> bool {
 pub async fn run_shell(
     database: String,
     text: String,
+    read_only: Option<bool>,
     state: State<'_, AppState>,
 ) -> AppResult<ShellOutcome> {
     let statement = shell::parse_statement(&text)?;
+    if read_only.unwrap_or(false) {
+        if let Some(what) = statement_writes(&statement) {
+            return Err(AppError::Other(format!(
+                "{what} is blocked: this workspace is read-only. Switch to edit mode to run writes."
+            )));
+        }
+    }
     let client = current_client(&state).await?;
     let db = client.database(&database);
     let started = Instant::now();
@@ -3171,6 +2934,41 @@ pub async fn run_shell(
     }
 }
 
+/// Names the write a shell statement would perform, or None when it only reads.
+/// runCommand / adminCommand are treated as writes: they can do anything.
+fn statement_writes(statement: &Statement) -> Option<String> {
+    const WRITE_METHODS: &[&str] = &[
+        "insertOne", "insertMany", "updateOne", "updateMany", "replaceOne", "deleteOne",
+        "deleteMany", "drop", "createIndex", "createIndexes", "dropIndex", "dropIndexes",
+        "renameCollection", "findOneAndUpdate", "findOneAndReplace", "findOneAndDelete",
+        "bulkWrite", "remove", "save", "insert", "update",
+    ];
+    match statement {
+        Statement::CreateCollection(_) => Some("createCollection".into()),
+        Statement::DropDatabase => Some("dropDatabase".into()),
+        Statement::RunCommand(_) => Some("runCommand".into()),
+        Statement::AdminCommand(_) => Some("adminCommand".into()),
+        Statement::Collection { method, args, .. } => {
+            if WRITE_METHODS.contains(&method.as_str()) {
+                return Some(format!("{method}()"));
+            }
+            if method == "aggregate" {
+                if let Some(Value::Array(stages)) = args.first() {
+                    for st in stages {
+                        if let Some(obj) = st.as_object() {
+                            if obj.contains_key("$out") || obj.contains_key("$merge") {
+                                return Some("aggregate with $out/$merge".into());
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 async fn run_collection_method(
     db: mongodb::Database,
     collection: &str,
@@ -3220,7 +3018,7 @@ async fn run_collection_method(
             "toArray" | "pretty" => {}
             other => {
                 return Err(AppError::Parse(format!(
-                    ".{other}() is not supported — supported chains: sort, limit, skip, project, hint, count, allowDiskUse, toArray, pretty"
+                    ".{other}() is not supported - supported chains: sort, limit, skip, project, hint, count, allowDiskUse, toArray, pretty"
                 )))
             }
         }
@@ -3340,7 +3138,7 @@ async fn run_collection_method(
                 .ok_or_else(|| AppError::Parse(format!("{method}(filter, update) needs an update document")))?;
             if !update.keys().any(|k| k.starts_with('$')) {
                 return Err(AppError::Parse(
-                    "update must use operators like {$set: {...}} — use replaceOne for full replacement".into(),
+                    "update must use operators like {$set: {...}} - use replaceOne for full replacement".into(),
                 ));
             }
             let upsert = opt_bool(&args, 2, "upsert");
@@ -3380,7 +3178,7 @@ async fn run_collection_method(
             let filter = arg_doc(&args, 0)?;
             if method == "deleteMany" && filter.is_empty() && args.is_empty() {
                 return Err(AppError::Parse(
-                    "deleteMany() with no filter would delete everything — pass {} explicitly if you mean it".into(),
+                    "deleteMany() with no filter would delete everything - pass {} explicitly if you mean it".into(),
                 ));
             }
             let result = if method == "deleteOne" {
@@ -3463,7 +3261,7 @@ async fn run_collection_method(
             Ok(ShellOutcome::value(v, ms(started)))
         }
         other => Err(AppError::Parse(format!(
-            "{other}() is not supported — supported: find, findOne, aggregate, countDocuments, \
+            "{other}() is not supported - supported: find, findOne, aggregate, countDocuments, \
              estimatedDocumentCount, distinct, insertOne, insertMany, updateOne, updateMany, \
              replaceOne, deleteOne, deleteMany, drop, getIndexes, createIndex, dropIndex, stats"
         ))),

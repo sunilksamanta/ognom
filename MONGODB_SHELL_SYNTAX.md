@@ -1,7 +1,7 @@
 # Ognom shell syntax
 
 The shell tab (and the filter / sort / projection boxes, and the document
-editor) understand mongosh-flavored syntax — not just strict JSON.
+editor) understand mongosh-flavored syntax - not just strict JSON.
 
 Everything below is parsed **string-aware**: helper syntax inside your string
 data is never rewritten.
@@ -14,7 +14,7 @@ One statement per run. Comments (`//` and `/* */`) are allowed anywhere.
 db.users.find({ role: "admin" }, { name: 1 }).sort({ createdAt: -1 }).skip(10).limit(5)
 db.users.findOne({ _id: ObjectId("507f1f77bcf86cd799439011") })
 db.orders.aggregate([
-  { $match: { status: "paid" } },           // unquoted keys, comments — fine
+  { $match: { status: "paid" } },           // unquoted keys, comments - fine
   { $group: { _id: "$category", n: { $sum: 1 } } },
 ])
 db.users.countDocuments({ active: true })
@@ -23,10 +23,10 @@ db.users.distinct("country", { active: true })
 
 db.users.insertOne({ name: "Ada", joined: ISODate() })
 db.users.insertMany([{ a: 1 }, { a: 2 }])
-db.users.updateOne({ _id: ObjectId("…") }, { $set: { active: false } })
+db.users.updateOne({ _id: ObjectId("...") }, { $set: { active: false } })
 db.users.updateMany({ active: false }, { $set: { archived: true } }, { upsert: false })
-db.users.replaceOne({ _id: ObjectId("…") }, { name: "Replaced" })
-db.users.deleteOne({ _id: ObjectId("…") })
+db.users.replaceOne({ _id: ObjectId("...") }, { name: "Replaced" })
+db.users.deleteOne({ _id: ObjectId("...") })
 db.users.deleteMany({ archived: true })
 
 db.users.getIndexes()
@@ -59,8 +59,8 @@ capped at **500**.
 
 ### Updates
 
-`updateOne` / `updateMany` require operator documents (`{ $set: … }`). For a
-full replacement use `replaceOne` — this mirrors mongosh and prevents
+`updateOne` / `updateMany` require operator documents (`{ $set: ... }`). For a
+full replacement use `replaceOne` - this mirrors mongosh and prevents
 accidental document clobbering.
 
 ## Value syntax (JSON5 + helpers)
@@ -85,19 +85,19 @@ accidental document clobbering.
 }
 ```
 
-Whole numbers are stored as integers (Int32/Int64), fractional as doubles —
+Whole numbers are stored as integers (Int32/Int64), fractional as doubles - 
 the same heuristic mongosh uses. Use `NumberLong` / `NumberDecimal` / `Double`
 to force a type.
 
 ### Display
 
 Results render as relaxed Extended JSON with shell-style affordances:
-`ObjectId(…)` pills, ISO dates, typed colors in both the JSON tree and the
+`ObjectId(...)` pills, ISO dates, typed colors in both the JSON tree and the
 table. *Copy as shell* produces text that pastes straight back into mongosh
 or this shell; *Copy as Extended JSON* produces strict JSON.
 
 ## Not supported (yet)
 
 - Multiple statements per run, variables, or arbitrary JavaScript
-- Regex literals (`/abc/i`) — use `{ $regex: "abc", $options: "i" }`
+- Regex literals (`/abc/i`) - use `{ $regex: "abc", $options: "i" }`
 - `findOneAndUpdate` family, bulk operations, transactions

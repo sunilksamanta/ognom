@@ -1,6 +1,6 @@
 //! mongosh-style statement parsing.
 //!
-//! Pipeline: strip comments → convert shell helpers (ObjectId, ISODate, …) to
+//! Pipeline: strip comments → convert shell helpers (ObjectId, ISODate, ...) to
 //! Extended JSON → parse with json5 (unquoted keys, single quotes, trailing
 //! commas) → normalize whole numbers back to integers.
 //!
@@ -192,7 +192,7 @@ pub fn normalize_numbers(v: Value) -> Value {
     }
 }
 
-/// Parse one shell-flavored JSON value (document, array, string, number…).
+/// Parse one shell-flavored JSON value (document, array, string, number...).
 pub fn parse_value(text: &str) -> AppResult<Value> {
     let trimmed = text.trim();
     let prepared = convert_helpers(trimmed);
@@ -203,24 +203,24 @@ pub fn parse_value(text: &str) -> AppResult<Value> {
 /// Turn json5's raw pest diagnostic (a multi-line ASCII caret dump) into a
 /// single readable sentence pointing at the offending line.
 ///
-/// `convert_helpers` rewrites the text before json5 sees it (e.g. `ISODate("…")`
-/// → `{"$date":"…"}`), which shifts columns but never adds or removes newlines —
+/// `convert_helpers` rewrites the text before json5 sees it (e.g. `ISODate("...")`
+/// → `{"$date":"..."}`), which shifts columns but never adds or removes newlines - 
 /// so the reported *line* still lines up with the user's editor, but the column
 /// does not. We surface the line (and its text), not the bogus column.
 fn friendly_parse_error(e: json5::Error, source: &str) -> AppError {
     let json5::Error::Message { msg, location } = e;
     let message = match location {
-        // A pest syntax error. Its `= expected …` list names grammar rules
+        // A pest syntax error. Its `= expected ...` list names grammar rules
         // (e.g. "expected boolean or null" for a missing comma), which reads as
-        // gibberish to a user — so we swap it for a generic, actionable hint and
+        // gibberish to a user - so we swap it for a generic, actionable hint and
         // point at the offending line instead.
         Some(loc) => {
-            const HINT: &str = "invalid syntax — check for a missing comma, quote, colon, or bracket";
+            const HINT: &str = "invalid syntax - check for a missing comma, quote, colon, or bracket";
             match source.lines().nth(loc.line - 1).map(str::trim) {
                 Some(line) if !line.is_empty() => {
-                    format!("near line {} (`{}`) — {}", loc.line, line, HINT)
+                    format!("near line {} (`{}`) - {}", loc.line, line, HINT)
                 }
-                _ => format!("near line {} — {}", loc.line, HINT),
+                _ => format!("near line {} - {}", loc.line, HINT),
             }
         }
         // No location means a semantic error (e.g. "expected a document") whose
@@ -327,7 +327,7 @@ fn parse_segments(s: &str) -> AppResult<Vec<Segment>> {
         }
         if chars[i] != '.' {
             return Err(AppError::Parse(format!(
-                "unexpected '{}' — expected '.' after '{}'",
+                "unexpected '{}' - expected '.' after '{}'",
                 chars[i],
                 chars[..i].iter().collect::<String>().trim()
             )));
@@ -353,7 +353,7 @@ fn parse_segments(s: &str) -> AppResult<Vec<Segment>> {
             let mut j = i;
             let close = loop {
                 if j >= chars.len() {
-                    return Err(AppError::Parse(format!("unclosed '(' in .{name}(…)")));
+                    return Err(AppError::Parse(format!("unclosed '(' in .{name}(...)")));
                 }
                 match chars[j] {
                     '"' | '\'' => {
@@ -385,7 +385,7 @@ fn parse_args(name: &str, raw: &str) -> AppResult<Vec<Value>> {
     split_args(raw)
         .iter()
         .map(|a| {
-            parse_value(a).map_err(|e| AppError::Parse(format!("in {name}(…): {e}")))
+            parse_value(a).map_err(|e| AppError::Parse(format!("in {name}(...): {e}")))
         })
         .collect()
 }
@@ -436,7 +436,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
 
     if !(s == "db" || s.starts_with("db.") || s.starts_with("db ")) {
         return Err(AppError::Parse(
-            "statements must start with db. — e.g. db.users.find({})".into(),
+            "statements must start with db. - e.g. db.users.find({})".into(),
         ));
     }
     if s == "db" {
@@ -465,7 +465,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
     if idx >= segments.len() {
         let path = coll_parts.join(".");
         return Err(AppError::Parse(format!(
-            "db.{path} is not a command — did you mean db.{path}.find({{}})?"
+            "db.{path} is not a command - did you mean db.{path}.find({{}})?"
         )));
     }
 
@@ -528,7 +528,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
             }
             other => {
                 return Err(AppError::Parse(format!(
-                    "db.{other}() is not supported — supported: stats, runCommand, adminCommand, \
+                    "db.{other}() is not supported - supported: stats, runCommand, adminCommand, \
                      createCollection, dropDatabase, getCollectionNames, getCollection, version"
                 )));
             }
@@ -540,7 +540,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
         Segment::Call(n, r) => (n.clone(), parse_args(n, r)?),
         Segment::Plain(p) => {
             return Err(AppError::Parse(format!(
-                "expected a method call, found '.{p}' — did you mean .{p}()?"
+                "expected a method call, found '.{p}' - did you mean .{p}()?"
             )))
         }
     };

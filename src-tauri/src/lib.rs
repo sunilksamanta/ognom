@@ -22,7 +22,7 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_opener::init())?;
             }
 
-            // macOS: add "About Ognom" and "Check for Updates…" to the
+            // macOS: add "About Ognom" and "Check for Updates..." to the
             // system Help menu; both forward to the webview via menu-action.
             #[cfg(target_os = "macos")]
             {
@@ -34,7 +34,7 @@ pub fn run() {
                 let updates = MenuItem::with_id(
                     handle,
                     "check-updates",
-                    "Check for Updates…",
+                    "Check for Updates...",
                     true,
                     None::<&str>,
                 )?;
@@ -81,6 +81,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_env,
             commands::security_info,
             commands::set_secret_backend,
             commands::list_connections,
@@ -131,10 +132,6 @@ pub fn run() {
             commands::analyze_schema,
             commands::export_collection,
             commands::import_documents,
-            commands::ai_chat,
-            commands::set_ai_key,
-            commands::ai_key_status,
-            commands::save_file,
             commands::run_shell,
         ])
         .run(tauri::generate_context!())

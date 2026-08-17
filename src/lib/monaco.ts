@@ -16,7 +16,7 @@ self.MonacoEnvironment = {
 let done = false;
 
 // ---------------------------------------------------------------------------
-// Shell completions — IntelliShell-style. The ShellPane keeps this registry
+// Shell completions - IntelliShell-style. The ShellPane keeps this registry
 // fresh with the active database's collection names and the current
 // collection's sampled field paths; the provider below reads it live.
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ export function ensureMonaco(): void {
     triggerCharacters: [".", "$", '"', "'", "{", ","],
     provideCompletionItems(model, position) {
       // Context comes from everything before the cursor (bounded), not just
-      // the current line — filter bodies span lines, and a key typed on line 2
+      // the current line - filter bodies span lines, and a key typed on line 2
       // of `{\n  na` must still see the `{`.
       const tail = model
         .getValueInRange(new monaco.Range(1, 1, position.lineNumber, position.column))
@@ -140,7 +140,7 @@ export function ensureMonaco(): void {
         push(MONGO_OPERATORS, kind.Operator, { detail: "operator" });
         return { suggestions: items };
       }
-      // key position — after { , or [ (whitespace/newlines and an optional
+      // key position - after { , or [ (whitespace/newlines and an optional
       // opening quote in between) → sampled field paths + operators
       if (/[{,[]\s*["']?[\w.]*$/.test(tail)) {
         push(completionCtx.fields, kind.Field, { detail: "field" });
@@ -164,7 +164,7 @@ export function ensureMonaco(): void {
         [/\/\*/, "comment", "@comment"],
         // `db` only acts as the shell handle when followed by a dot.
         [/\bdb\b(?=\s*\.)/, { token: "keyword.db", next: "@afterDb" }],
-        // chained cursor methods: .sort( .limit( …
+        // chained cursor methods: .sort( .limit( ...
         [/\.\s*[A-Za-z_$][\w$]*(?=\s*\()/, "function"],
         [
           /\b(?:ObjectId|ISODate|NumberLong|NumberInt|NumberDecimal|Double|BinData|UUID|Timestamp|DBRef|MinKey|MaxKey|Date)\b(?=\s*\()/,
@@ -221,76 +221,107 @@ export function ensureMonaco(): void {
     comments: { lineComment: "//", blockComment: ["/*", "*/"] },
   });
 
-  const sharedRules = (c: Record<string, string>): monaco.editor.ITokenThemeRule[] => [
-    { token: "keyword.db", foreground: c.db, fontStyle: "bold" },
-    { token: "namespace", foreground: c.namespace },
-    { token: "function", foreground: c.func },
-    { token: "constant.helper", foreground: c.db },
-    { token: "key", foreground: c.key },
-    { token: "string", foreground: c.string },
-    { token: "number", foreground: c.number },
-    { token: "number.float", foreground: c.number },
-    { token: "keyword.literal", foreground: c.literal },
-    { token: "keyword", foreground: c.literal },
-    { token: "operator.mongo", foreground: c.operator },
-    { token: "comment", foreground: c.comment, fontStyle: "italic" },
-    { token: "delimiter", foreground: c.delimiter },
-  ];
+  applyMonacoTheme();
+}
 
-  monaco.editor.defineTheme("ognom-dark", {
-    base: "vs-dark",
+/** Read a theme-kit token from the document root (hex or rgb). */
+function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** Any CSS colour to #rrggbb[aa] (Monaco wants hex). */
+function toHex(css: string, fallback: string): string {
+  if (!css) return fallback;
+  if (/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(css)) return css;
+  if (/^#[0-9a-f]{3}$/i.test(css)) return "#" + [...css.slice(1)].map((c) => c + c).join("");
+  const m = css.match(/rgba?\(([^)]+)\)/i);
+  if (m) {
+    const parts = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    const [r, g, b] = parts;
+    const a = parts.length > 3 ? parts[3] : 1;
+    const h = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+    return `#${h(r)}${h(g)}${h(b)}${a < 1 ? h(a * 255) : ""}`;
+  }
+  return fallback;
+}
+
+/**
+ * (Re)build the single Ognom Monaco theme from the live theme-kit tokens and
+ * activate it. Called on every theme change so editors re-tint with the app.
+ */
+export function applyMonacoTheme(): void {
+  const dark = document.documentElement.classList.contains("dark");
+  const c = {
+    key: toHex(token("--s-key"), "CBD8D2"),
+    str: toHex(token("--s-str"), "7FD8A0"),
+    num: toHex(token("--s-num"), "C3A7F1"),
+    bool: toHex(token("--s-bool"), "E9B44C"),
+    date: toHex(token("--s-date"), "6BC5E8"),
+    oid: toHex(token("--s-oid"), "00ED64"),
+    punc: toHex(token("--s-punc"), "5A6B64"),
+    accent: toHex(token("--accent"), "00ED64"),
+    accent2: toHex(token("--accent-2"), "7FE1FF"),
+    text: toHex(token("--text"), "EDF2EF"),
+    text2: toHex(token("--text-2"), "A2AEA8"),
+    text3: toHex(token("--text-3"), "6C7A74"),
+    bg: toHex(token("--bg"), "111413"),
+    panel2: toHex(token("--panel-2"), "1B201E"),
+    raised: toHex(token("--raised"), "20261F"),
+    hover: toHex(token("--hover"), "242A27"),
+    soft: toHex(token("--accent-soft"), "00ED6420"),
+    line: toHex(token("--accent-line"), "00ED6450"),
+  };
+  const strip = (h: string) => h.replace("#", "").slice(0, 6);
+  monaco.editor.defineTheme("ognom", {
+    base: dark ? "vs-dark" : "vs",
     inherit: true,
-    rules: sharedRules({
-      db: "00ED64",
-      namespace: "9DB2AE",
-      func: "5FB0EE",
-      key: "C3D2CE",
-      string: "7FD8A0",
-      number: "C2A6F0",
-      literal: "E8B153",
-      operator: "5FB0EE",
-      comment: "4E635F",
-      delimiter: "4E635F",
-    }),
+    rules: [
+      { token: "keyword.db", foreground: strip(c.accent), fontStyle: "bold" },
+      { token: "namespace", foreground: strip(c.text2) },
+      { token: "function", foreground: strip(c.date) },
+      { token: "constant.helper", foreground: strip(c.oid) },
+      { token: "key", foreground: strip(c.key) },
+      { token: "string", foreground: strip(c.str) },
+      { token: "number", foreground: strip(c.num) },
+      { token: "number.float", foreground: strip(c.num) },
+      { token: "keyword.literal", foreground: strip(c.bool) },
+      { token: "keyword", foreground: strip(c.bool) },
+      { token: "operator.mongo", foreground: strip(c.accent2) },
+      { token: "comment", foreground: strip(c.text3), fontStyle: "italic" },
+      { token: "delimiter", foreground: strip(c.punc) },
+      { token: "", foreground: strip(c.text) },
+    ],
     colors: {
-      "editor.background": "#00121A",
-      "editor.lineHighlightBackground": "#042430",
-      "editorLineNumber.foreground": "#33474C",
-      "editorLineNumber.activeForeground": "#9DB2AE",
-      "editor.selectionBackground": "#15422F",
-      "editorCursor.foreground": "#00ED64",
-      "editorBracketMatch.border": "#00ED6455",
-      "editorWidget.background": "#08303D",
-      "editorSuggestWidget.background": "#08303D",
-      "scrollbarSlider.background": "#13445333",
-      "scrollbarSlider.hoverBackground": "#13445366",
+      "editor.background": "#00000000",
+      "editor.foreground": c.text,
+      "editor.lineHighlightBackground": "#00000000",
+      "editorLineNumber.foreground": c.text3,
+      "editorLineNumber.activeForeground": c.text2,
+      "editor.selectionBackground": c.soft.length === 9 ? c.soft : c.soft + "33",
+      "editor.inactiveSelectionBackground": c.soft.length === 9 ? c.soft : c.soft + "22",
+      "editorCursor.foreground": c.accent,
+      "editorBracketMatch.border": c.line.length === 9 ? c.line : c.line + "66",
+      "editorBracketMatch.background": "#00000000",
+      "editorWidget.background": c.raised,
+      "editorWidget.border": c.hover,
+      "editorSuggestWidget.background": c.raised,
+      "editorSuggestWidget.border": c.hover,
+      "editorSuggestWidget.selectedBackground": c.hover,
+      "editorSuggestWidget.foreground": c.text,
+      "editorHoverWidget.background": c.raised,
+      "editorHoverWidget.border": c.hover,
+      "input.background": c.panel2,
+      "input.foreground": c.text,
+      "scrollbarSlider.background": c.hover + "aa",
+      "scrollbarSlider.hoverBackground": c.hover,
+      "scrollbarSlider.activeBackground": c.hover,
+      "editorIndentGuide.background1": c.panel2,
+      "editorIndentGuide.activeBackground1": c.hover,
+      "editorGutter.background": "#00000000",
+      "editor.placeholder.foreground": c.text3,
     },
   });
-
-  monaco.editor.defineTheme("ognom-light", {
-    base: "vs",
-    inherit: true,
-    rules: sharedRules({
-      db: "00875A",
-      namespace: "5A6B68",
-      func: "2E84C8",
-      key: "2E403D",
-      string: "1F8A4C",
-      number: "6D3FC0",
-      literal: "996A12",
-      operator: "2E84C8",
-      comment: "7C8B88",
-      delimiter: "7C8B88",
-    }),
-    colors: {
-      "editor.background": "#FFFFFF",
-      "editor.lineHighlightBackground": "#F1F6F5",
-      "editorLineNumber.foreground": "#BBC9C6",
-      "editorLineNumber.activeForeground": "#5A6B68",
-      "editor.selectionBackground": "#CFF3E0",
-      "editorCursor.foreground": "#00875A",
-    },
-  });
+  monaco.editor.setTheme("ognom");
 }
 
 export const MONO_FONT =

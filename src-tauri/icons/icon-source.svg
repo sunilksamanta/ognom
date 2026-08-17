@@ -1,14 +1,1 @@
-<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#34D399"/>
-      <stop offset="100%" stop-color="#0E9F6E"/>
-    </linearGradient>
-  </defs>
-  <rect x="32" y="32" width="960" height="960" rx="240" fill="url(#g)"/>
-  <path d="M400 288c-80 0-112 41.6-112 112v70.4c0 38.4-19.2 57.6-57.6 57.6 38.4 0 57.6 19.2 57.6 57.6V656c0 70.4 32 112 112 112"
-        fill="none" stroke="#06281A" stroke-width="70" stroke-linecap="round"/>
-  <path d="M624 288c80 0 112 41.6 112 112v70.4c0 38.4 19.2 57.6 57.6 57.6-38.4 0-57.6 19.2-57.6 57.6V656c0 70.4-32 112-112 112"
-        fill="none" stroke="#06281A" stroke-width="70" stroke-linecap="round"/>
-  <circle cx="512" cy="528" r="74" fill="#06281A"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#12E96A"></stop><stop offset=".62" stop-color="#00A24C"></stop><stop offset="1" stop-color="#00684A"></stop></linearGradient></defs><rect width="512" height="512" rx="132" fill="url(#g)"></rect><g transform="translate(116 116) scale(2.333)" fill="#04180D"><g transform="rotate(-12 60 60)"><path d="M14.7 52A46 46 0 0 1 105.3 52L89.5 54.8A30 30 0 0 0 30.5 54.8Z"></path><path d="M105.3 68A46 46 0 0 1 14.7 68L30.5 65.2A30 30 0 0 0 89.5 65.2Z" opacity=".5"></path></g><circle cx="60" cy="60" r="7"></circle></g></svg>
