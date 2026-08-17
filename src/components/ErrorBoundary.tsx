@@ -40,16 +40,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <div className="max-w-lg rounded-lg border border-destructive/40 bg-destructive/5 p-5 text-sm">
-          <div className="flex items-center gap-2 text-destructive">
+        <div className="warnbox max-w-lg flex-col gap-3">
+          <div className="flex items-center gap-2 text-danger">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <span className="font-medium">Something broke in this view</span>
           </div>
-          <p className="mt-2 text-muted-foreground">
-            The rest of the app is fine — you can retry or switch tabs.
-          </p>
+          <p className="text-text-2">The rest of the app is fine - you can retry or switch tabs.</p>
           {error.message && (
-            <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border bg-card p-2.5 font-mono text-[11px] text-muted-foreground">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--r-sm)] border border-line bg-panel-2 p-2.5 font-mono text-[11px] text-text-3">
               {error.message}
             </pre>
           )}

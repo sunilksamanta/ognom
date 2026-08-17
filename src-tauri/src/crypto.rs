@@ -60,7 +60,7 @@ fn keyring_entry() -> AppResult<keyring::Entry> {
 impl Crypto {
     /// Load (or create) the master key.
     ///
-    /// Default is the local key file — zero prompts on every platform. The OS
+    /// Default is the local key file - zero prompts on every platform. The OS
     /// keychain is opt-in via the in-app toggle. Installs that already have a
     /// keychain entry from before the toggle existed keep using it.
     ///
@@ -110,7 +110,7 @@ impl Crypto {
     }
 
     /// Move the (unchanged) master key to the other backend. Stored secrets
-    /// stay valid — only where the key itself lives changes.
+    /// stay valid - only where the key itself lives changes.
     pub fn migrate(&mut self, data_dir: &PathBuf, to: KeySource) -> AppResult<()> {
         match to {
             KeySource::Keychain => {

@@ -1,0 +1,173 @@
+/* ==========================================================
+   OGNOM THEME KIT v2
+   One token contract → any number of themes.
+   Themes set ONLY the variables in the block below; no theme
+   ever touches component CSS. Density is a separate axis.
+
+   Add a theme:
+     [data-theme="yours"]{ ...every key from the contract... }
+   Register it in the picker with:  <button data-t="yours">
+   ========================================================== */
+
+:root{
+  /* ---- type (themes may override --display) ---- */
+  --sans:'Geist',system-ui,sans-serif;
+  --mono:'Geist Mono',ui-monospace,monospace;
+  --display:'Space Grotesk',system-ui,sans-serif;
+  /* ---- geometry, shared ---- */
+  --r-xs:5px; --r-sm:8px; --r:11px; --r-lg:15px; --r-xl:22px;
+  --ease:cubic-bezier(.4,0,.2,1);
+  /* ---- density axis (default: comfortable) ---- */
+  --row:34px; --cell-y:11px; --cell-x:14px; --gap:10px;
+  --pad:22px; --fs-ui:12.5px; --fs-mono:12px; --fs-doc:12.5px; --lh-doc:1.75;
+}
+[data-density="compact"]{
+  --row:27px; --cell-y:6px; --cell-x:11px; --gap:7px;
+  --pad:15px; --fs-ui:12px; --fs-mono:11.5px; --fs-doc:12px; --lh-doc:1.55;
+}
+[data-density="roomy"]{
+  --row:42px; --cell-y:15px; --cell-x:18px; --gap:14px;
+  --pad:28px; --fs-ui:13px; --fs-mono:12.5px; --fs-doc:13px; --lh-doc:1.9;
+}
+
+/* ================= THE CONTRACT =================
+   chrome bg panel panel-2 raised hover active
+   line line-2 · text text-2 text-3
+   accent accent-2 accent-ink accent-soft accent-line accent-glow
+   ok warn danger · s-punc s-key s-str s-num s-bool s-date s-oid
+   shadow · wm (watermark opacity) · desk (backdrop outside window)
+   ================================================ */
+
+/* ---------- 1 · MONGO DARK - spring green on warm graphite ---------- */
+[data-theme="mongo-dark"]{
+  --chrome:#0B0D0C; --bg:#111413; --panel:#161A18; --panel-2:#1B201E;
+  --raised:#20261F; --hover:#242A27; --active:#2B332F;
+  --line:rgba(198,222,210,.08); --line-2:rgba(198,222,210,.16);
+  --text:#EDF2EF; --text-2:#A2AEA8; --text-3:#6C7A74;
+  --accent:#00ED64; --accent-2:#7FE1FF; --accent-ink:#04180D;
+  --accent-soft:rgba(0,237,100,.12); --accent-line:rgba(0,237,100,.32); --accent-glow:rgba(0,237,100,.24);
+  --ok:#31D07B; --warn:#E9B44C; --danger:#F0705F;
+  --s-punc:#5A6B64; --s-key:#CBD8D2; --s-str:#7FD8A0; --s-num:#C3A7F1; --s-bool:#E9B44C; --s-date:#6BC5E8; --s-oid:#00ED64;
+  --shadow:0 24px 60px -24px rgba(0,0,0,.75); --wm:.055; --desk:#08090A;
+}
+
+/* ---------- 2 · MONGO LIGHT - forest green on cool paper ---------- */
+[data-theme="mongo-light"]{
+  --chrome:#EBEFEC; --bg:#F7FAF8; --panel:#F1F5F2; --panel-2:#E9EFEB;
+  --raised:#FFFFFF; --hover:#E4EBE6; --active:#D8E3DB;
+  --line:rgba(16,58,40,.1); --line-2:rgba(16,58,40,.19);
+  --text:#0F2A1F; --text-2:#4C6558; --text-3:#84998C;
+  --accent:#00684A; --accent-2:#1D7FB8; --accent-ink:#EAFFF3;
+  --accent-soft:rgba(0,104,74,.09); --accent-line:rgba(0,104,74,.3); --accent-glow:rgba(0,104,74,.16);
+  --ok:#0E8A54; --warn:#9A6B12; --danger:#B8382F;
+  --s-punc:#9FB0A6; --s-key:#28453A; --s-str:#0F7048; --s-num:#6C3FA8; --s-bool:#96650F; --s-date:#1A6A8C; --s-oid:#00684A;
+  --shadow:0 22px 48px -26px rgba(20,50,38,.3); --wm:.075; --desk:#DDE4DF;
+}
+
+/* ---------- 3 · BLOOM - floral daylight: warm paper, plum ink, rose ---------- */
+[data-theme="bloom"]{
+  --chrome:#F1E8DE; --bg:#FBF6F0; --panel:#F6EDE5; --panel-2:#F1E6DC;
+  --raised:#FFFFFF; --hover:#F0E4DA; --active:#E9DACE;
+  --line:rgba(88,54,62,.11); --line-2:rgba(88,54,62,.2);
+  --text:#3A2A2F; --text-2:#7A6068; --text-3:#A99098;
+  --accent:#B4527A; --accent-2:#6E8F6A; --accent-ink:#FFF6F9;
+  --accent-soft:rgba(180,82,122,.1); --accent-line:rgba(180,82,122,.3); --accent-glow:rgba(180,82,122,.18);
+  --ok:#5C8C5A; --warn:#C08A2E; --danger:#C24B45;
+  --s-punc:#B5A29B; --s-key:#5C4750; --s-str:#4E7A56; --s-num:#8A5AA8; --s-bool:#B07A22; --s-date:#3D7590; --s-oid:#B4527A;
+  --shadow:0 22px 50px -26px rgba(90,60,50,.35); --wm:.07; --desk:#E7DCD2;
+  --display:'Instrument Serif',Georgia,serif;
+}
+
+/* ---------- 4 · BLOOM NOIR - floral after dark: aubergine, rose, sage ---------- */
+[data-theme="bloom-noir"]{
+  --chrome:#150E14; --bg:#1D141C; --panel:#241926; --panel-2:#2B1E2C;
+  --raised:#332534; --hover:#3A2A3B; --active:#453247;
+  --line:rgba(240,205,225,.09); --line-2:rgba(240,205,225,.17);
+  --text:#F6E9F1; --text-2:#C2A6B6; --text-3:#8E7484;
+  --accent:#F49AC1; --accent-2:#9DC49A; --accent-ink:#2A0F1D;
+  --accent-soft:rgba(244,154,193,.13); --accent-line:rgba(244,154,193,.34); --accent-glow:rgba(244,154,193,.26);
+  --ok:#9DC49A; --warn:#EBB765; --danger:#F0796F;
+  --s-punc:#6F5867; --s-key:#E3D0DC; --s-str:#A8D3A4; --s-num:#D3A6F2; --s-bool:#EBB765; --s-date:#8CC8E8; --s-oid:#F49AC1;
+  --shadow:0 26px 60px -24px rgba(0,0,0,.8); --wm:.07; --desk:#100A10;
+  --display:'Instrument Serif',Georgia,serif;
+}
+
+/* ---------- 5 · MIDNIGHT - indigo night, iris accent ---------- */
+[data-theme="midnight"]{
+  --chrome:#0A0A16; --bg:#101126; --panel:#161835; --panel-2:#1B1E40;
+  --raised:#212549; --hover:#272B54; --active:#2F3563;
+  --line:rgba(190,196,255,.1); --line-2:rgba(190,196,255,.18);
+  --text:#EDEEFF; --text-2:#A4A8D4; --text-3:#6E7299;
+  --accent:#9B8CFF; --accent-2:#65E0D0; --accent-ink:#0C0A22;
+  --accent-soft:rgba(155,140,255,.14); --accent-line:rgba(155,140,255,.34); --accent-glow:rgba(155,140,255,.28);
+  --ok:#57D9A3; --warn:#F0C05A; --danger:#FF7A7A;
+  --s-punc:#5D6291; --s-key:#CDD1F5; --s-str:#7BE0C0; --s-num:#F0A6D0; --s-bool:#F0C05A; --s-date:#7FC4FF; --s-oid:#9B8CFF;
+  --shadow:0 26px 64px -24px rgba(0,0,0,.8); --wm:.075; --desk:#070714;
+}
+
+/* ---------- 6 · MONO - pure greyscale, one blue for focus ---------- */
+[data-theme="mono"]{
+  --chrome:#0E0E0F; --bg:#151517; --panel:#1B1B1E; --panel-2:#212125;
+  --raised:#27272B; --hover:#2D2D32; --active:#37373D;
+  --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.16);
+  --text:#F2F2F3; --text-2:#A7A7AD; --text-3:#71717A;
+  --accent:#E8E8EA; --accent-2:#8FB8E8; --accent-ink:#17171A;
+  --accent-soft:rgba(255,255,255,.1); --accent-line:rgba(255,255,255,.28); --accent-glow:rgba(255,255,255,.14);
+  --ok:#B9C4BB; --warn:#D0C39C; --danger:#E0A39C;
+  --s-punc:#5E5E66; --s-key:#DADADE; --s-str:#B6C6BA; --s-num:#C4BBD6; --s-bool:#D0C39C; --s-date:#A9BCC8; --s-oid:#F2F2F3;
+  --shadow:0 24px 56px -26px rgba(0,0,0,.7); --wm:.06; --desk:#0A0A0B;
+}
+
+/* ---------- 7 · CONTRAST - high contrast, WCAG-AAA leaning ---------- */
+[data-theme="contrast"]{
+  --chrome:#000000; --bg:#000000; --panel:#0A0A0A; --panel-2:#121212;
+  --raised:#1A1A1A; --hover:#242424; --active:#303030;
+  --line:rgba(255,255,255,.28); --line-2:rgba(255,255,255,.48);
+  --text:#FFFFFF; --text-2:#D8D8D8; --text-3:#A8A8A8;
+  --accent:#3BFF88; --accent-2:#7FD8FF; --accent-ink:#00160A;
+  --accent-soft:rgba(59,255,136,.18); --accent-line:rgba(59,255,136,.7); --accent-glow:rgba(59,255,136,.35);
+  --ok:#3BFF88; --warn:#FFD24A; --danger:#FF7A6A;
+  --s-punc:#9A9A9A; --s-key:#FFFFFF; --s-str:#8FFFC0; --s-num:#D8B4FF; --s-bool:#FFD24A; --s-date:#8FD8FF; --s-oid:#3BFF88;
+  --shadow:0 0 0 1px rgba(255,255,255,.4); --wm:.11; --desk:#000000;
+}
+
+/* ---------- 8 · SOLAR - warm solarized daylight ---------- */
+[data-theme="solar"]{
+  --chrome:#EEE3C8; --bg:#FDF6E3; --panel:#F5EDD6; --panel-2:#EFE6CD;
+  --raised:#FFFBF0; --hover:#EAE0C6; --active:#DFD3B4;
+  --line:rgba(88,110,117,.16); --line-2:rgba(88,110,117,.3);
+  --text:#073642; --text-2:#586E75; --text-3:#93A1A1;
+  --accent:#B58900; --accent-2:#268BD2; --accent-ink:#2B1A00;
+  --accent-soft:rgba(181,137,0,.13); --accent-line:rgba(181,137,0,.4); --accent-glow:rgba(181,137,0,.2);
+  --ok:#859900; --warn:#CB4B16; --danger:#DC322F;
+  --s-punc:#93A1A1; --s-key:#073642; --s-str:#2AA198; --s-num:#6C71C4; --s-bool:#CB4B16; --s-date:#268BD2; --s-oid:#B58900;
+  --shadow:0 20px 44px -26px rgba(88,110,117,.4); --wm:.09; --desk:#E4D9BC;
+}
+
+/* ---------- 9 · AUTO - follow the OS ---------- */
+@media (prefers-color-scheme: dark){
+  [data-theme="auto"]{
+    --chrome:#0B0D0C; --bg:#111413; --panel:#161A18; --panel-2:#1B201E;
+    --raised:#20261F; --hover:#242A27; --active:#2B332F;
+    --line:rgba(198,222,210,.08); --line-2:rgba(198,222,210,.16);
+    --text:#EDF2EF; --text-2:#A2AEA8; --text-3:#6C7A74;
+    --accent:#00ED64; --accent-2:#7FE1FF; --accent-ink:#04180D;
+    --accent-soft:rgba(0,237,100,.12); --accent-line:rgba(0,237,100,.32); --accent-glow:rgba(0,237,100,.24);
+    --ok:#31D07B; --warn:#E9B44C; --danger:#F0705F;
+    --s-punc:#5A6B64; --s-key:#CBD8D2; --s-str:#7FD8A0; --s-num:#C3A7F1; --s-bool:#E9B44C; --s-date:#6BC5E8; --s-oid:#00ED64;
+    --shadow:0 24px 60px -24px rgba(0,0,0,.75); --wm:.055; --desk:#08090A;
+  }
+}
+@media (prefers-color-scheme: light){
+  [data-theme="auto"]{
+    --chrome:#EBEFEC; --bg:#F7FAF8; --panel:#F1F5F2; --panel-2:#E9EFEB;
+    --raised:#FFFFFF; --hover:#E4EBE6; --active:#D8E3DB;
+    --line:rgba(16,58,40,.1); --line-2:rgba(16,58,40,.19);
+    --text:#0F2A1F; --text-2:#4C6558; --text-3:#84998C;
+    --accent:#00684A; --accent-2:#1D7FB8; --accent-ink:#EAFFF3;
+    --accent-soft:rgba(0,104,74,.09); --accent-line:rgba(0,104,74,.3); --accent-glow:rgba(0,104,74,.16);
+    --ok:#0E8A54; --warn:#9A6B12; --danger:#B8382F;
+    --s-punc:#9FB0A6; --s-key:#28453A; --s-str:#0F7048; --s-num:#6C3FA8; --s-bool:#96650F; --s-date:#1A6A8C; --s-oid:#00684A;
+    --shadow:0 22px 48px -26px rgba(20,50,38,.3); --wm:.075; --desk:#DDE4DF;
+  }
+}

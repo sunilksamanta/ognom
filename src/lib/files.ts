@@ -15,7 +15,7 @@ async function withProgressToast(
   run: (jobId: string) => Promise<{ documents: number; canceled: boolean }>
 ): Promise<{ documents: number; canceled: boolean } | null> {
   const jobId = crypto.randomUUID();
-  const toastId = toast.loading(`${label}…`, {
+  const toastId = toast.loading(`${label}...`, {
     action: { label: "Cancel", onClick: () => void api.cancelJob(jobId) },
   });
   let unlisten: UnlistenFn | null = null;
@@ -23,7 +23,7 @@ async function withProgressToast(
     unlisten = await listen<CopyProgress>("copy-progress", (e) => {
       if (e.payload.jobId !== jobId) return;
       const total = e.payload.total ? ` / ${e.payload.total.toLocaleString()}` : "";
-      toast.loading(`${label} — ${e.payload.copied.toLocaleString()}${total} documents`, {
+      toast.loading(`${label} - ${e.payload.copied.toLocaleString()}${total} documents`, {
         id: toastId,
         action: { label: "Cancel", onClick: () => void api.cancelJob(jobId) },
       });
@@ -42,7 +42,29 @@ async function withProgressToast(
 
 export type ExportFormat = "json" | "csv" | "ndjson" | "bson";
 
-/** Prompt for a path and export matching documents — streamed, cancellable. */
+/** Export matching documents to a known path - streamed, cancellable, with a
+ *  progress toast. Returns the outcome (null on error). */
+export async function runExport(args: {
+  database: string;
+  collection: string;
+  filter: string;
+  sort: string;
+  format: ExportFormat;
+  path: string;
+}) {
+  const outcome = await withProgressToast(`Exporting ${args.collection}`, (jobId) =>
+    api.exportCollection({ ...args, jobId })
+  );
+  if (!outcome) return null;
+  if (outcome.canceled) {
+    toast.info(`Export canceled - ${outcome.documents.toLocaleString()} documents written`);
+  } else {
+    toast.success(`Exported ${outcome.documents.toLocaleString()} document${outcome.documents === 1 ? "" : "s"}`);
+  }
+  return outcome;
+}
+
+/** Prompt for a path and export matching documents. */
 export async function exportCollection(args: {
   database: string;
   collection: string;
@@ -57,15 +79,7 @@ export async function exportCollection(args: {
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   }).catch(() => null);
   if (!path) return;
-  const outcome = await withProgressToast(`Exporting ${args.collection}`, (jobId) =>
-    api.exportCollection({ ...args, path, jobId })
-  );
-  if (!outcome) return;
-  if (outcome.canceled) {
-    toast.info(`Export canceled — ${outcome.documents.toLocaleString()} documents written`);
-  } else {
-    toast.success(`Exported ${outcome.documents.toLocaleString()} document${outcome.documents === 1 ? "" : "s"}`);
-  }
+  await runExport({ ...args, path });
 }
 
 /** Prompt for a path and export saved connections. `includeSecrets` requires a
@@ -120,7 +134,7 @@ export async function runConnectionImport(
     const outcome = await api.importConnections(path, passphrase);
     const tail =
       outcome.needsPassword > 0
-        ? ` — set a password on ${outcome.needsPassword} of them`
+        ? ` - set a password on ${outcome.needsPassword} of them`
         : "";
     toast.success(`Imported ${outcome.imported} connection${outcome.imported === 1 ? "" : "s"}${tail}`);
     return outcome;
@@ -130,7 +144,7 @@ export async function runConnectionImport(
   }
 }
 
-/** Prompt for a JSON/NDJSON/CSV/BSON file and import its documents —
+/** Prompt for a JSON/NDJSON/CSV/BSON file and import its documents - 
  *  streamed in batches, cancellable. Returns true when anything landed. */
 export async function importDocuments(database: string, collection: string): Promise<boolean> {
   const path = await open({
@@ -146,7 +160,7 @@ export async function importDocuments(database: string, collection: string): Pro
   );
   if (!outcome) return false;
   if (outcome.canceled) {
-    toast.info(`Import canceled — ${outcome.documents.toLocaleString()} documents inserted`);
+    toast.info(`Import canceled - ${outcome.documents.toLocaleString()} documents inserted`);
   } else {
     toast.success(`Imported ${outcome.documents.toLocaleString()} document${outcome.documents === 1 ? "" : "s"}`);
   }

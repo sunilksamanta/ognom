@@ -1,214 +1,40 @@
+@import "./styles/theme-kit.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Tailwind's preflight resets borders to 0 with `border-style: solid`; give
+   every element the hairline colour so `border` utilities read the token. */
 @layer base {
-  :root {
-    /* ── Ognom light · MongoDB spring green on a calm teal-white ── */
-    --background: 190 30% 97%;
-    --foreground: 196 48% 12%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 196 48% 12%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 196 48% 12%;
-
-    /* Spring green held in reserve for actions; dark text rides on it. */
-    --primary: 149 100% 33%;
-    --primary-foreground: 153 100% 5%;
-
-    --secondary: 190 22% 92%;
-    --secondary-foreground: 196 30% 22%;
-
-    --muted: 190 20% 93%;
-    --muted-foreground: 196 12% 42%;
-
-    --accent: 190 24% 90%;
-    --accent-foreground: 196 48% 12%;
-
-    --destructive: 5 72% 50%;
-    --destructive-foreground: 0 0% 100%;
-
-    --warning: 38 84% 40%;
-    --info: 206 72% 44%;
-
-    --border: 194 22% 86%;
-    --input: 194 24% 82%;
-    --ring: 149 100% 33%;
-
-    --radius: 0.5625rem;
-
-    /* BSON value colors (harmonized syntax — darkened for light) */
-    --bson-key: 196 26% 30%;
-    --bson-string: 142 55% 30%;
-    --bson-number: 263 55% 50%;
-    --bson-boolean: 38 82% 36%;
-    --bson-null: 196 10% 48%;
-    --bson-oid: 150 100% 27%;
-    --bson-date: 197 70% 35%;
-  }
-
-  .dark {
-    /* ── Ognom dark · MongoDB Slate-Blue canvas + spring green ──── */
-    --background: 196 100% 7.5%; /* #001C26 — MongoDB Slate Blue */
-    --foreground: 160 22% 92%; /* #E6EFEC */
-
-    --card: 196 85% 10%; /* #042430 — surfaces / panels */
-    --card-foreground: 160 22% 92%;
-    --popover: 195 77% 14%; /* #08303D — raised: inputs, popovers */
-    --popover-foreground: 160 22% 92%;
-
-    --primary: 145 100% 46%; /* #00ED64 — spring green, reserved */
-    --primary-foreground: 153 100% 5%; /* #00160C */
-
-    --secondary: 195 77% 14%;
-    --secondary-foreground: 160 22% 92%;
-
-    --muted: 196 85% 10%;
-    --muted-foreground: 168 14% 66%; /* #9DB2AE */
-
-    --accent: 195 67% 17%; /* #0E3A48 — hover well */
-    --accent-foreground: 160 22% 92%;
-
-    --destructive: 5 80% 65%; /* #ED6A5E */
-    --destructive-foreground: 0 0% 100%;
-
-    --warning: 38 76% 62%; /* #E8B153 */
-    --info: 206 81% 65%; /* #5FB0EE — Studio / AI sky-blue */
-
-    --border: 194 32% 15%; /* hairline */
-    --input: 194 34% 18%;
-    --ring: 145 100% 46%;
-
-    /* BSON value colors (harmonized, low-neon syntax) */
-    --bson-key: 164 14% 79%; /* #C3D2CE */
-    --bson-string: 142 53% 67%; /* #7FD8A0 */
-    --bson-number: 263 71% 80%; /* #C2A6F0 */
-    --bson-boolean: 38 76% 62%; /* #E8B153 */
-    --bson-null: 170 11% 44%; /* #647B77 */
-    --bson-oid: 145 100% 46%; /* #00ED64 */
-    --bson-date: 197 73% 66%; /* #6BC5E8 */
-  }
-
   * {
-    @apply border-border;
-  }
-
-  html,
-  body,
-  #root {
-    height: 100%;
-  }
-
-  body {
-    @apply bg-background text-foreground font-sans antialiased;
-    overscroll-behavior: none;
-  }
-
-  ::selection {
-    background: hsl(var(--primary) / 0.25);
-  }
-
-  /* Slim, theme-aware scrollbars */
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.25);
-    border-radius: 5px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.45);
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-  ::-webkit-scrollbar-corner {
-    background: transparent;
+    border-color: var(--line);
   }
 }
 
 @layer utilities {
   .font-data {
-    font-family: theme(fontFamily.mono);
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-
-  /* Keep native UI text from being draggable in a desktop window */
-  .no-select {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  /* Soft spring-green wash used on the welcome screen, empty states, splash. */
-  .app-gradient {
-    background-image:
-      radial-gradient(55% 45% at 18% 22%, hsl(var(--primary) / 0.07), transparent 65%),
-      radial-gradient(45% 40% at 85% 80%, hsl(var(--primary) / 0.05), transparent 60%);
-  }
-
-  .dark .app-gradient {
-    background-image:
-      radial-gradient(55% 45% at 18% 22%, hsl(var(--primary) / 0.1), transparent 65%),
-      radial-gradient(45% 40% at 85% 80%, hsl(var(--primary) / 0.07), transparent 60%);
+    font-family: var(--mono);
+    font-size: var(--fs-doc);
+    line-height: var(--lh-doc);
   }
 }
 
-/* ── splash screen ─────────────────────────────────────────────── */
-
+/* Splash animation */
 @keyframes splash-mark {
-  0% {
-    opacity: 0;
-    transform: scale(0.82) translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  0% { opacity: 0; transform: scale(0.82) translateY(8px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
-
 @keyframes splash-rise {
-  0% {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
-
-@keyframes splash-glow {
-  0% {
-    opacity: 0;
-    transform: scale(0.7);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.splash-mark {
-  animation: splash-mark 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.splash-rise {
-  animation: splash-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.splash-glow {
-  animation: splash-glow 0.9s ease-out both;
-}
-
+.splash-mark { animation: splash-mark 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.splash-rise { animation: splash-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @media (prefers-reduced-motion: reduce) {
-  .splash-mark,
-  .splash-rise,
-  .splash-glow {
-    animation: none;
-  }
+  .splash-mark, .splash-rise { animation: none; }
+}
+
+/* Monaco: let the theme tokens paint the editor chrome */
+.monaco-editor, .monaco-editor .margin, .monaco-editor-background {
+  background-color: transparent !important;
 }

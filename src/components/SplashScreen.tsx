@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { OgnomMark } from "@/components/WelcomeScreen";
+import { OgnomMark } from "@/components/brand/OgnomMark";
 import { cn } from "@/lib/utils";
 
-const HOLD_MS = 1900;
-const FADE_MS = 450;
+const HOLD_MS = 1400;
+const FADE_MS = 400;
 const SESSION_KEY = "ognom-splash-shown";
 
 /**
- * Brand moment on launch: the narrative, loud and clear, then out of the way.
+ * Brand moment on launch: the mark on the canvas surface, then out of the way.
  * Shows once per app session; a click skips it immediately.
  */
 export function SplashScreen() {
@@ -18,7 +18,6 @@ export function SplashScreen() {
   useEffect(() => {
     if (phase !== "visible") return;
     sessionStorage.setItem(SESSION_KEY, "1");
-    // QA override: sessionStorage.setItem("ognom-splash-hold", ms)
     const holdMs = Number(sessionStorage.getItem("ognom-splash-hold")) || HOLD_MS;
     const hold = setTimeout(() => setPhase("fading"), holdMs);
     return () => clearTimeout(hold);
@@ -36,31 +35,19 @@ export function SplashScreen() {
     <div
       onClick={() => setPhase("fading")}
       className={cn(
-        "no-select fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5",
-        "app-gradient bg-background transition-opacity ease-out",
+        "no-select fixed inset-0 z-[100] flex flex-col items-center justify-center gap-6 bg-bg transition-opacity ease-out",
         phase === "fading" && "opacity-0"
       )}
       style={{ transitionDuration: `${FADE_MS}ms` }}
       aria-hidden
     >
-      {/* soft halo behind the mark */}
-      <div className="relative">
-        <div className="splash-glow absolute -inset-10 rounded-full bg-primary/15 blur-3xl" />
-        <OgnomMark className="splash-mark relative h-20 w-20 drop-shadow-xl" />
+      <OgnomMark className="splash-mark h-[72px] w-[72px] text-primary" />
+      <div className="splash-rise flex flex-col items-center gap-2 text-center" style={{ animationDelay: "0.15s" }}>
+        <h1 className="font-display text-[34px] font-semibold leading-none tracking-[-0.03em] text-text">Ognom</h1>
+        <p className="text-[13.5px] text-text-2">The free, no-nonsense MongoDB client.</p>
       </div>
-
-      <div className="splash-rise flex flex-col items-center gap-2 text-center" style={{ animationDelay: "0.18s" }}>
-        <h1 className="text-4xl font-bold tracking-tight">Ognom</h1>
-        <p className="text-lg text-muted-foreground">
-          The <span className="font-semibold text-primary">free</span>, no-nonsense MongoDB client.
-        </p>
-      </div>
-
-      <p
-        className="splash-rise text-xs tracking-wide text-muted-foreground/70"
-        style={{ animationDelay: "0.38s" }}
-      >
-        Free & open source · no account · no telemetry · yours forever
+      <p className="splash-rise font-mono text-[10.5px] tracking-[0.12em] text-text-3" style={{ animationDelay: "0.3s" }}>
+        FREE AND OPEN SOURCE · NO ACCOUNT · NO TELEMETRY
       </p>
     </div>
   );

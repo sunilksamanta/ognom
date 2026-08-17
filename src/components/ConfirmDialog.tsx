@@ -1,6 +1,8 @@
-import { ReactNode, useEffect, useId, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -8,9 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CheckRow } from "@/components/ui/check-row";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -29,6 +29,8 @@ interface ConfirmDialogProps {
   onConfirm: () => void | Promise<void>;
 }
 
+/** Generic confirm in the design's modal shape: title, mono subline, body,
+ *  outline-danger or primary action. */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -43,12 +45,9 @@ export function ConfirmDialog({
   confirmPhraseLabel,
   onConfirm,
 }: ConfirmDialogProps) {
-  const ackId = useId();
-  const phraseId = useId();
   const [ack, setAck] = useState(false);
   const [phrase, setPhrase] = useState("");
 
-  // Reset the guards each time the dialog opens.
   useEffect(() => {
     if (open) {
       setAck(false);
@@ -58,65 +57,59 @@ export function ConfirmDialog({
 
   const phraseOk = !confirmPhrase || phrase.trim() === confirmPhrase.trim();
   const canConfirm = !busy && (!requireAck || ack) && phraseOk;
+  const hasBody = !!description || requireAck || !!confirmPhrase;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[420px]">
+    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+      <DialogContent className="max-w-[460px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {description && <DialogDescription asChild={typeof description !== "string"}>
-            {typeof description === "string" ? description : <div>{description}</div>}
-          </DialogDescription>}
+          <DialogDescription className="sr-only">{title}</DialogDescription>
         </DialogHeader>
-
-        {requireAck && (
-          <Label
-            htmlFor={ackId}
-            className="flex cursor-pointer items-center gap-2.5 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm font-normal"
-          >
-            <Checkbox
-              id={ackId}
-              checked={ack}
-              onCheckedChange={(c) => setAck(c === true)}
-              disabled={busy}
-            />
-            {ackLabel}
-          </Label>
+        {hasBody && (
+          <DialogBody>
+            {description && (
+              <div className="text-[12.5px] leading-[1.55] text-text-2">
+                {description}
+              </div>
+            )}
+            {requireAck && (
+              <div className="warnbox soft py-[9px]">
+                <CheckRow on={ack} onChange={setAck} disabled={busy}>
+                  {ackLabel}
+                </CheckRow>
+              </div>
+            )}
+            {confirmPhrase && (
+              <div className="fld">
+                <label>
+                  {confirmPhraseLabel ?? (
+                    <>
+                      Type <span className="text-text">{confirmPhrase}</span> to confirm
+                    </>
+                  )}
+                </label>
+                <input
+                  className="in"
+                  value={phrase}
+                  onChange={(e) => setPhrase(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && canConfirm && void onConfirm()}
+                  disabled={busy}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={confirmPhrase}
+                  autoFocus
+                />
+              </div>
+            )}
+          </DialogBody>
         )}
-
-        {confirmPhrase && (
-          <div className="space-y-1.5">
-            <Label htmlFor={phraseId} className="text-xs font-normal text-muted-foreground">
-              {confirmPhraseLabel ?? (
-                <>
-                  Type <span className="font-mono font-medium text-foreground">{confirmPhrase}</span>{" "}
-                  to confirm
-                </>
-              )}
-            </Label>
-            <Input
-              id={phraseId}
-              value={phrase}
-              onChange={(e) => setPhrase(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && canConfirm && void onConfirm()}
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              className="h-8"
-            />
-          </div>
-        )}
-
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            variant={destructive ? "destructive" : "default"}
-            size="sm"
-            disabled={!canConfirm}
-            onClick={() => void onConfirm()}
-          >
+          <Button variant={destructive ? "destructive" : "default"} disabled={!canConfirm} onClick={() => void onConfirm()}>
+            {busy && <Loader2 className="spin" />}
             {confirmLabel}
           </Button>
         </DialogFooter>

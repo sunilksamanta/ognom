@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Search } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,10 +15,9 @@ import { formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 import type { Tab } from "@/stores/explorer";
 
-interface SchemaSheetProps {
+interface SchemaPaneProps {
   tab: Tab;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  active: boolean;
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -38,11 +30,12 @@ const TYPE_COLOR: Record<string, string> = {
   null: "text-bson-null",
   objectId: "text-bson-oid",
   date: "text-bson-date",
-  object: "text-muted-foreground",
-  array: "text-muted-foreground",
+  object: "text-text-3",
+  array: "text-text-3",
 };
 
-export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
+export function SchemaPane({ tab, active }: SchemaPaneProps) {
+  const open = active;
   const [report, setReport] = useState<SchemaReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [sampleSize, setSampleSize] = useState(1000);
@@ -59,39 +52,28 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
     }
   };
 
+  // Analyse once when first shown; refresh is manual after that.
   useEffect(() => {
-    if (open) {
-      setReport(null);
-      setFilter("");
-      void load();
-    }
+    if (open && !report && !loading) void load();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const f = filter.trim().toLowerCase();
   const fields = (report?.fields ?? []).filter((x) => !f || x.path.toLowerCase().includes(f));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px]">
-        <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle>Schema analysis</DialogTitle>
-          <DialogDescription className="font-mono text-xs">
-            {tab.database}.{tab.collection}
-            {report && (
-              <span className="ml-2 text-muted-foreground">
-                · sampled {formatCount(report.sampled)} docs · {report.fields.length} fields
-              </span>
-            )}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex shrink-0 items-center gap-2 border-b px-5 py-2.5">
-          <div className="relative flex-1">
-            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+    <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-[var(--pad)] py-2.5">
+          <span className="font-mono text-[11px] text-text-3">
+            {report
+              ? `sampled ${formatCount(report.sampled)} docs · ${report.fields.length} fields`
+              : "field types and coverage from a sample"}
+          </span>
+          <div className="relative ml-auto w-[240px]">
+            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-3" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter fields…"
+              placeholder="Filter fields"
               className="h-8 pl-7 text-xs"
             />
           </div>
@@ -128,13 +110,13 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-3">
+        <div className="flex-1 overflow-y-auto px-[var(--pad)] py-3">
           {loading && !report ? (
             <div className="flex justify-center py-10">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <Loader2 className="spin h-5 w-5 text-text-3" />
             </div>
           ) : fields.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">
+            <p className="py-10 text-center text-[12.5px] text-text-3">
               {report ? "No matching fields" : "No data"}
             </p>
           ) : (
@@ -145,18 +127,18 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
                 return (
                   <div
                     key={field.path}
-                    className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-md border bg-card px-3 py-2"
+                    className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-[var(--r-sm)] border border-line bg-panel px-3 py-2"
                   >
                     <div className="min-w-0" style={{ paddingLeft: depth * 14 }}>
                       <div className="flex items-center gap-2">
-                        <span className="truncate font-mono text-xs font-medium">{field.path}</span>
+                        <span className="ky truncate font-mono text-xs">{field.path}</span>
                         <span className="flex flex-wrap gap-1">
                           {field.types.map((t) => (
                             <span
                               key={t.type}
                               className={cn(
-                                "rounded bg-muted px-1 text-[10px] font-medium",
-                                TYPE_COLOR[t.type] ?? "text-muted-foreground"
+                                "tt",
+                                TYPE_COLOR[t.type] ?? "text-text-3"
                               )}
                             >
                               {t.type}
@@ -166,13 +148,13 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
                         </span>
                       </div>
                       {field.examples.length > 0 && (
-                        <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
+                        <p className="mt-0.5 truncate font-mono text-[10.5px] text-text-3">
                           e.g. {field.examples.map((x) => JSON.stringify(x)).join(", ")}
                         </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-panel-2">
                         <div
                           className={cn(
                             "h-full rounded-full",
@@ -181,7 +163,7 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <span className="w-9 text-right text-[11px] tabular-nums text-muted-foreground">
+                      <span className="w-9 text-right font-mono text-[11px] tabular-nums text-text-3">
                         {pct}%
                       </span>
                     </div>
@@ -191,7 +173,6 @@ export function SchemaSheet({ tab, open, onOpenChange }: SchemaSheetProps) {
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }

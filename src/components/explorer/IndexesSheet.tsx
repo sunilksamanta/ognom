@@ -14,19 +14,8 @@ import {
   LayoutList,
   X,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Separator } from "@/components/ui/separator";
+import { CheckRow } from "@/components/ui/check-row";
 import {
   Select,
   SelectContent,
@@ -40,10 +29,11 @@ import { toShellText, formatBytes, formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 import type { Tab } from "@/stores/explorer";
 
-interface IndexesSheetProps {
+interface IndexesPaneProps {
   tab: Tab;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  /** Load when the pane becomes visible. */
+  active: boolean;
+  readOnly: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +151,8 @@ function buildKeysText(keys: KeyField[]): string {
 
 // ---------------------------------------------------------------------------
 
-export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
+export function IndexesPane({ tab, active, readOnly }: IndexesPaneProps) {
+  const open = active;
   const [indexes, setIndexes] = useState<IndexInfo[] | null>(null);
   const [stats, setStats] = useState<CollectionStats | null>(null);
   const [creating, setCreating] = useState(false);
@@ -221,7 +212,7 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
     if (opts.ttlEnabled && Number(opts.ttlSeconds) > 0)
       o.expireAfterSeconds = Number(opts.ttlSeconds);
     if (opts.partialEnabled && opts.partialText.trim())
-      o.partialFilterExpression = "{…}";
+      o.partialFilterExpression = "{...}";
     if (opts.caseInsensitive) o.collation = { locale: "en", strength: 2 };
     return o;
   }, [opts]);
@@ -257,18 +248,10 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[680px]">
-          <DialogHeader className="border-b px-5 py-4">
-            <DialogTitle>Indexes &amp; stats</DialogTitle>
-            <DialogDescription className="font-mono text-xs">
-              {tab.database}.{tab.collection}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-[860px] flex-col gap-[14px] px-[var(--pad)] py-[var(--pad)]">
             {stats && (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+              <div className="statgrid five">
                 {(
                   [
                     ["Documents", formatCount(stats.count)],
@@ -278,22 +261,20 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
                     ["Index size", formatBytes(stats.totalIndexSize)],
                   ] as const
                 ).map(([label, value]) => (
-                  <div key={label} className="rounded-md border bg-muted/40 px-2.5 py-1.5">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {label}
-                    </p>
-                    <p className="text-sm font-semibold tabular-nums">{value}</p>
+                  <div key={label}>
+                    <div className="l">{label}</div>
+                    <div className="v">{value}</div>
                   </div>
                 ))}
               </div>
             )}
 
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold">
-                Indexes{indexes ? ` (${indexes.length})` : ""}
-              </h4>
+              <span className="lbl">
+                Indexes{indexes ? ` · ${indexes.length}` : ""}
+              </span>
               {!creating && (
-                <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+                <Button variant="outline" size="sm" disabled={readOnly} onClick={() => setCreating(true)}>
                   <Plus className="h-3.5 w-3.5" />
                   New index
                 </Button>
@@ -326,27 +307,23 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
 
             {indexes === null ? (
               <div className="flex justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Loader2 className="spin h-5 w-5 text-text-3" />
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-[7px]">
                 {indexes.map((idx) => (
-                  <div
-                    key={idx.name}
-                    className="group flex items-center gap-2 rounded-md border bg-card px-3 py-2"
-                  >
+                  <div key={idx.name} className="idxrow group">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate text-sm font-medium">{idx.name}</span>
+                        <span className="n">{idx.name}</span>
                         {idx.unique && <IdxBadge>unique</IdxBadge>}
                         {idx.sparse && <IdxBadge>sparse</IdxBadge>}
                         {idx.hidden && <IdxBadge>hidden</IdxBadge>}
                         {idx.partialFilter && <IdxBadge>partial</IdxBadge>}
                         {idx.ttlSeconds != null && <IdxBadge>ttl {idx.ttlSeconds}s</IdxBadge>}
                         {idx.usageOps === 0 && idx.name !== "_id_" && (
-                          <Badge
-                            variant="outline"
-                            className="border-warning/50 px-1.5 py-0 text-[10px] font-medium text-warning"
+                          <span
+                            className="pill warn"
                             title={
                               idx.usageSince
                                 ? `No operations have used this index since ${new Date(idx.usageSince).toLocaleString()}`
@@ -354,15 +331,15 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
                             }
                           >
                             unused
-                          </Badge>
+                          </span>
                         )}
                       </div>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
+                      <p className="mt-1 truncate font-mono text-[11px] text-text-3">
                         {toShellText(idx.keys)}
                       </p>
                       {idx.usageOps != null && idx.usageOps > 0 && (
                         <p
-                          className="text-[10px] tabular-nums text-muted-foreground/70"
+                          className="mt-0.5 font-mono text-[10px] tabular-nums text-text-3"
                           title={
                             idx.usageSince
                               ? `Counting since ${new Date(idx.usageSince).toLocaleString()}`
@@ -373,23 +350,21 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
                         </p>
                       )}
                     </div>
-                    {idx.name !== "_id_" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                    {idx.name !== "_id_" && !readOnly && (
+                      <button
+                        className="ico dgr opacity-0 transition-opacity group-hover:opacity-100"
                         onClick={() => setDropping(idx.name)}
+                        aria-label={`Drop index ${idx.name}`}
                       >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
+                        <X />
+                      </button>
                     )}
                   </div>
                 ))}
               </div>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={dropping !== null}
@@ -420,11 +395,7 @@ export function IndexesSheet({ tab, open, onOpenChange }: IndexesSheetProps) {
 }
 
 function IdxBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <Badge variant="secondary" className="h-4 px-1 text-[10px] font-normal">
-      {children}
-    </Badge>
-  );
+  return <span className="pill">{children}</span>;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,206 +443,130 @@ function CreateForm({
     setOpts((o) => ({ ...o, [k]: v }));
 
   return (
-    <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
-      {/* Templates */}
-      <div>
-        <Label className="mb-2 block text-xs text-muted-foreground">Start from a template</Label>
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+    <div className="stack rounded-[var(--r)] border border-line bg-panel p-4">
+      <div className="fld">
+        <label>Start from a template</label>
+        <div className="opts">
           {TEMPLATES.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => applyTemplate(t)}
-              className="flex items-start gap-2 rounded-md border bg-background px-2.5 py-2 text-left transition-colors hover:border-primary/50 hover:bg-accent"
-            >
-              <t.icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              <div className="min-w-0">
-                <p className="text-xs font-medium leading-tight">{t.label}</p>
-                <p className="truncate text-[10px] text-muted-foreground">{t.desc}</p>
-              </div>
+            <button key={t.id} type="button" onClick={() => applyTemplate(t)} className="opt">
+              <b>
+                <t.icon className="text-primary" />
+                {t.label}
+              </b>
+              <span>{t.desc}</span>
             </button>
           ))}
         </div>
       </div>
 
-      <Separator />
-
-      {/* Keys */}
-      <div className="space-y-2">
+      <div className="fld">
         <div className="flex items-center justify-between">
-          <Label className="text-xs">Index fields</Label>
+          <label>Index fields</label>
           <button
+            type="button"
             onClick={() => setRawMode(!rawMode)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 text-[11px] text-text-3 transition-colors hover:text-text"
           >
             {rawMode ? <LayoutList className="h-3 w-3" /> : <Code2 className="h-3 w-3" />}
             {rawMode ? "Visual builder" : "Raw JSON"}
           </button>
         </div>
-
         {rawMode ? (
-          <Input
+          <input
+            className="in"
             value={rawKeys}
             onChange={(e) => setRawKeys(e.target.value)}
-            className="h-8 font-mono text-xs"
-            placeholder='{ email: 1, createdAt: -1 }'
+            placeholder="{ email: 1, createdAt: -1 }"
             spellCheck={false}
           />
         ) : (
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             {keys.map((k) => (
               <div key={k.id} className="flex items-center gap-1.5">
-                <Input
+                <input
+                  className="in flex-1"
                   value={k.field}
-                  onChange={(e) =>
-                    setKeys((ks) =>
-                      ks.map((x) => (x.id === k.id ? { ...x, field: e.target.value } : x))
-                    )
-                  }
-                  className="h-8 flex-1 font-mono text-xs"
+                  onChange={(e) => setKeys((ks) => ks.map((x) => (x.id === k.id ? { ...x, field: e.target.value } : x)))}
                   placeholder="field name (e.g. email)"
                   spellCheck={false}
                 />
-                <Select
-                  value={k.type}
-                  onValueChange={(v) =>
-                    setKeys((ks) =>
-                      ks.map((x) => (x.id === k.id ? { ...x, type: v as KeyType } : x))
-                    )
-                  }
-                >
-                  <SelectTrigger className="h-8 w-[150px] text-xs">
+                <Select value={k.type} onValueChange={(v) => setKeys((ks) => ks.map((x) => (x.id === k.id ? { ...x, type: v as KeyType } : x)))}>
+                  <SelectTrigger className="w-[160px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {KEY_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value} className="text-xs">
+                      <SelectItem key={t.value} value={t.value}>
                         {t.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                <button
+                  type="button"
+                  className="ico dgr shrink-0"
                   disabled={keys.length === 1}
                   onClick={() => setKeys((ks) => ks.filter((x) => x.id !== k.id))}
+                  aria-label="Remove field"
                 >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
+                  <X />
+                </button>
               </div>
             ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs text-muted-foreground"
-              onClick={() => setKeys((ks) => [...ks, newKey()])}
-            >
-              <Plus className="h-3.5 w-3.5" />
+            <button type="button" className="btn qt sm self-start" onClick={() => setKeys((ks) => [...ks, newKey()])}>
+              <Plus />
               Add field
-            </Button>
+            </button>
           </div>
         )}
       </div>
 
-      <Separator />
-
-      {/* Options */}
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Name (optional)</Label>
-          <Input
-            value={opts.name}
-            onChange={(e) => set("name", e.target.value)}
-            className="h-8 text-xs"
-            placeholder="auto-generated"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <OptToggle
-            label="Unique"
-            hint="Reject duplicate values"
-            checked={opts.unique}
-            onChange={(v) => set("unique", v)}
-          />
-          <OptToggle
-            label="Sparse"
-            hint="Skip docs missing the field"
-            checked={opts.sparse}
-            onChange={(v) => set("sparse", v)}
-          />
-          <OptToggle
-            label="Case-insensitive"
-            hint="Collation strength 2 (locale en)"
-            checked={opts.caseInsensitive}
-            onChange={(v) => set("caseInsensitive", v)}
-          />
-          <OptToggle
-            label={
-              <span className="flex items-center gap-1">
-                <EyeOff className="h-3 w-3" /> Hidden
-              </span>
-            }
-            hint="Built but ignored by the planner"
-            checked={opts.hidden}
-            onChange={(v) => set("hidden", v)}
-          />
-        </div>
-
-        {/* TTL */}
-        <div className="rounded-md border bg-background p-2.5">
-          <OptToggle
-            label="TTL — expire documents"
-            hint="Single ascending field on a Date"
-            checked={opts.ttlEnabled}
-            onChange={(v) => set("ttlEnabled", v)}
-          />
-          {opts.ttlEnabled && (
-            <div className="mt-2 flex items-center gap-2">
-              <Input
-                type="number"
-                min={1}
-                value={opts.ttlSeconds}
-                onChange={(e) => set("ttlSeconds", e.target.value)}
-                className="h-8 w-32 text-xs"
-              />
-              <span className="text-xs text-muted-foreground">seconds after the date value</span>
-            </div>
-          )}
-        </div>
-
-        {/* Partial filter */}
-        <div className="rounded-md border bg-background p-2.5">
-          <OptToggle
-            label="Partial filter expression"
-            hint="Only index docs matching a query"
-            checked={opts.partialEnabled}
-            onChange={(v) => set("partialEnabled", v)}
-          />
-          {opts.partialEnabled && (
-            <Input
-              value={opts.partialText}
-              onChange={(e) => set("partialText", e.target.value)}
-              className="mt-2 h-8 font-mono text-xs"
-              placeholder='{ "status": "active" }'
-              spellCheck={false}
-            />
-          )}
-        </div>
+      <div className="fld">
+        <label htmlFor="idx-name">Name (optional)</label>
+        <input id="idx-name" className="in" value={opts.name} onChange={(e) => set("name", e.target.value)} placeholder="auto-generated" />
       </div>
 
-      {/* Preview */}
-      <div className="rounded-md border border-dashed bg-background/60 px-3 py-2">
-        <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">Preview</p>
-        <code className="block break-all font-mono text-[11px] leading-relaxed text-foreground/90">
-          db.{collection}.createIndex(
-          <span className={cn(!canCreate && "text-destructive")}>{keysText}</span>
-          {Object.keys(preview).length > 0 && (
-            <>, {JSON.stringify(preview).replace(/"([^"]+)":/g, "$1: ")}</>
-          )}
-          )
-        </code>
+      <div className="grid grid-cols-2 gap-2">
+        <OptToggle label="Unique" hint="Reject duplicate values" checked={opts.unique} onChange={(v) => set("unique", v)} />
+        <OptToggle label="Sparse" hint="Skip docs missing the field" checked={opts.sparse} onChange={(v) => set("sparse", v)} />
+        <OptToggle label="Case-insensitive" hint="Collation strength 2 (locale en)" checked={opts.caseInsensitive} onChange={(v) => set("caseInsensitive", v)} />
+        <OptToggle
+          label={
+            <span className="flex items-center gap-1">
+              <EyeOff className="h-3 w-3" /> Hidden
+            </span>
+          }
+          hint="Built but ignored by the planner"
+          checked={opts.hidden}
+          onChange={(v) => set("hidden", v)}
+        />
+      </div>
+
+      <div className="rounded-[var(--r-sm)] border border-line bg-bg p-2.5">
+        <OptToggle label="TTL - expire documents" hint="Single ascending field on a Date" checked={opts.ttlEnabled} onChange={(v) => set("ttlEnabled", v)} />
+        {opts.ttlEnabled && (
+          <div className="mt-2 flex items-center gap-2">
+            <input className="in w-32" type="number" min={1} value={opts.ttlSeconds} onChange={(e) => set("ttlSeconds", e.target.value)} />
+            <span className="text-[11.5px] text-text-3">seconds after the date value</span>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-[var(--r-sm)] border border-line bg-bg p-2.5">
+        <OptToggle label="Partial filter expression" hint="Only index docs matching a query" checked={opts.partialEnabled} onChange={(v) => set("partialEnabled", v)} />
+        {opts.partialEnabled && (
+          <input className="in mt-2" value={opts.partialText} onChange={(e) => set("partialText", e.target.value)} placeholder='{ "status": "active" }' spellCheck={false} />
+        )}
+      </div>
+
+      <div className="fld">
+        <label>Preview</label>
+        <div className="notice mono">
+          <code className="block break-all">
+            db.{collection}.createIndex(<span className={cn(!canCreate && "text-danger")}>{keysText}</span>
+            {Object.keys(preview).length > 0 && <>, {JSON.stringify(preview).replace(/"([^"]+)":/g, "$1: ")}</>})
+          </code>
+        </div>
       </div>
 
       <div className="flex justify-end gap-2">
@@ -679,7 +574,7 @@ function CreateForm({
           Cancel
         </Button>
         <Button size="sm" onClick={onCreate} disabled={busy || !canCreate}>
-          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {busy && <Loader2 className="spin" />}
           Create index
         </Button>
       </div>
@@ -699,16 +594,11 @@ function OptToggle({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-2">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(v) => onChange(v === true)}
-        className="mt-0.5"
-      />
-      <span className="min-w-0">
-        <span className="block text-xs font-medium leading-tight">{label}</span>
-        <span className="block text-[10px] leading-tight text-muted-foreground">{hint}</span>
+    <CheckRow on={checked} onChange={onChange} className="items-start">
+      <span className="min-w-0 text-left">
+        <span className="block text-[12px] font-medium leading-tight text-text">{label}</span>
+        <span className="block text-[10.5px] leading-tight text-text-3">{hint}</span>
       </span>
-    </label>
+    </CheckRow>
   );
 }

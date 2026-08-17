@@ -1,6 +1,6 @@
 //! mongosh-style statement parsing.
 //!
-//! Pipeline: strip comments → convert shell helpers (ObjectId, ISODate, …) to
+//! Pipeline: strip comments → convert shell helpers (ObjectId, ISODate, ...) to
 //! Extended JSON → parse with json5 (unquoted keys, single quotes, trailing
 //! commas) → normalize whole numbers back to integers.
 //!
@@ -97,6 +97,8 @@ fn helper_rules() -> &'static Vec<HelperRule> {
             // 11: MinKey / MaxKey (callable or bare)
             Regex::new(r#"^MinKey(?:\s*\(\s*\))?"#).unwrap(),
             Regex::new(r#"^MaxKey(?:\s*\(\s*\))?"#).unwrap(),
+            // 13: new RegExp("pattern", "flags") / RegExp('pattern')
+            Regex::new(r#"^(?:new\s+)?RegExp\s*\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*(?:,\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*)?\)"#).unwrap(),
         ]
     });
     RULES.get_or_init(|| {
@@ -122,8 +124,74 @@ fn helper_rules() -> &'static Vec<HelperRule> {
             (&regexes[10], |c| format!(r#"{{"$timestamp":{{"t":{},"i":{}}}}}"#, &c[1], &c[2])),
             (&regexes[11], |_| r#"{"$minKey":1}"#.to_string()),
             (&regexes[12], |_| r#"{"$maxKey":1}"#.to_string()),
+            (&regexes[13], |c| {
+                let pattern = unquote_js(&c[1]);
+                let options = c.get(2).map(|m| unquote_js(m.as_str())).unwrap_or_default();
+                regex_ext_json(&pattern, &options)
+            }),
         ]
     })
+}
+
+/// Decode a quoted JS/JSON5 string literal ("..." or '...') to its value.
+fn unquote_js(quoted: &str) -> String {
+    json5::from_str::<String>(quoted).unwrap_or_else(|_| {
+        let inner = &quoted[1..quoted.len().saturating_sub(1)];
+        inner.replace("\\/", "/")
+    })
+}
+
+/// Canonical extJSON for a regular expression.
+fn regex_ext_json(pattern: &str, options: &str) -> String {
+    format!(
+        r#"{{"$regularExpression":{{"pattern":{},"options":{}}}}}"#,
+        serde_json::to_string(pattern).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(options).unwrap_or_else(|_| "\"\"".into())
+    )
+}
+
+/// `/pattern/flags` starting at `start` (chars[start] == '/'). Returns the
+/// index just past the flags when it is a well-formed regex literal.
+fn scan_regex_literal(chars: &[char], start: usize) -> Option<(usize, String, String)> {
+    let mut i = start + 1;
+    let mut pattern = String::new();
+    let mut in_class = false;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            if i + 1 >= chars.len() {
+                return None;
+            }
+            pattern.push(c);
+            pattern.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        if c == '\n' {
+            return None;
+        }
+        if c == '[' {
+            in_class = true;
+        } else if c == ']' {
+            in_class = false;
+        } else if c == '/' && !in_class {
+            let mut j = i + 1;
+            let mut flags = String::new();
+            while j < chars.len() && "gimsuxy".contains(chars[j]) {
+                flags.push(chars[j]);
+                j += 1;
+            }
+            // Must be followed by something that ends a value.
+            let next = chars[j..].iter().find(|c| !c.is_whitespace()).copied();
+            if matches!(next, None | Some(',') | Some('}') | Some(']') | Some(')')) {
+                return Some((j, pattern, flags));
+            }
+            return None;
+        }
+        pattern.push(c);
+        i += 1;
+    }
+    None
 }
 
 fn is_ident_char(c: char) -> bool {
@@ -136,6 +204,8 @@ pub fn convert_helpers(input: &str) -> String {
     let mut out = String::with_capacity(input.len() + 32);
     let mut i = 0;
     let mut prev: Option<char> = None;
+    // Last non-whitespace char emitted - a regex literal can only start a value.
+    let mut last_sig: Option<char> = None;
     while i < chars.len() {
         let c = chars[i];
         if c == '"' || c == '\'' {
@@ -143,7 +213,18 @@ pub fn convert_helpers(input: &str) -> String {
             out.extend(&chars[i..end.min(chars.len())]);
             i = end;
             prev = Some('"');
+            last_sig = Some('"');
             continue;
+        }
+        // /pattern/flags in value position -> $regularExpression
+        if c == '/' && matches!(last_sig, None | Some(':') | Some(',') | Some('[') | Some('(')) {
+            if let Some((end, pattern, flags)) = scan_regex_literal(&chars, i) {
+                out.push_str(&regex_ext_json(&pattern, &flags));
+                i = end;
+                prev = Some('}');
+                last_sig = Some('}');
+                continue;
+            }
         }
         // Helper names can only start a fresh identifier.
         if c.is_ascii_alphabetic() && !prev.map(is_ident_char).unwrap_or(false) {
@@ -155,6 +236,7 @@ pub fn convert_helpers(input: &str) -> String {
                     out.push_str(&fmt(&caps));
                     i += rest[..whole.end()].chars().count();
                     prev = Some('}');
+                    last_sig = Some('}');
                     matched = true;
                     break;
                 }
@@ -165,6 +247,9 @@ pub fn convert_helpers(input: &str) -> String {
         }
         out.push(c);
         prev = Some(c);
+        if !c.is_whitespace() {
+            last_sig = Some(c);
+        }
         i += 1;
     }
     out
@@ -192,7 +277,7 @@ pub fn normalize_numbers(v: Value) -> Value {
     }
 }
 
-/// Parse one shell-flavored JSON value (document, array, string, number…).
+/// Parse one shell-flavored JSON value (document, array, string, number...).
 pub fn parse_value(text: &str) -> AppResult<Value> {
     let trimmed = text.trim();
     let prepared = convert_helpers(trimmed);
@@ -203,24 +288,24 @@ pub fn parse_value(text: &str) -> AppResult<Value> {
 /// Turn json5's raw pest diagnostic (a multi-line ASCII caret dump) into a
 /// single readable sentence pointing at the offending line.
 ///
-/// `convert_helpers` rewrites the text before json5 sees it (e.g. `ISODate("…")`
-/// → `{"$date":"…"}`), which shifts columns but never adds or removes newlines —
+/// `convert_helpers` rewrites the text before json5 sees it (e.g. `ISODate("...")`
+/// → `{"$date":"..."}`), which shifts columns but never adds or removes newlines - 
 /// so the reported *line* still lines up with the user's editor, but the column
 /// does not. We surface the line (and its text), not the bogus column.
 fn friendly_parse_error(e: json5::Error, source: &str) -> AppError {
     let json5::Error::Message { msg, location } = e;
     let message = match location {
-        // A pest syntax error. Its `= expected …` list names grammar rules
+        // A pest syntax error. Its `= expected ...` list names grammar rules
         // (e.g. "expected boolean or null" for a missing comma), which reads as
-        // gibberish to a user — so we swap it for a generic, actionable hint and
+        // gibberish to a user - so we swap it for a generic, actionable hint and
         // point at the offending line instead.
         Some(loc) => {
-            const HINT: &str = "invalid syntax — check for a missing comma, quote, colon, or bracket";
+            const HINT: &str = "invalid syntax - check for a missing comma, quote, colon, or bracket";
             match source.lines().nth(loc.line - 1).map(str::trim) {
                 Some(line) if !line.is_empty() => {
-                    format!("near line {} (`{}`) — {}", loc.line, line, HINT)
+                    format!("near line {} (`{}`) - {}", loc.line, line, HINT)
                 }
-                _ => format!("near line {} — {}", loc.line, HINT),
+                _ => format!("near line {} - {}", loc.line, HINT),
             }
         }
         // No location means a semantic error (e.g. "expected a document") whose
@@ -327,7 +412,7 @@ fn parse_segments(s: &str) -> AppResult<Vec<Segment>> {
         }
         if chars[i] != '.' {
             return Err(AppError::Parse(format!(
-                "unexpected '{}' — expected '.' after '{}'",
+                "unexpected '{}' - expected '.' after '{}'",
                 chars[i],
                 chars[..i].iter().collect::<String>().trim()
             )));
@@ -353,7 +438,7 @@ fn parse_segments(s: &str) -> AppResult<Vec<Segment>> {
             let mut j = i;
             let close = loop {
                 if j >= chars.len() {
-                    return Err(AppError::Parse(format!("unclosed '(' in .{name}(…)")));
+                    return Err(AppError::Parse(format!("unclosed '(' in .{name}(...)")));
                 }
                 match chars[j] {
                     '"' | '\'' => {
@@ -385,7 +470,7 @@ fn parse_args(name: &str, raw: &str) -> AppResult<Vec<Value>> {
     split_args(raw)
         .iter()
         .map(|a| {
-            parse_value(a).map_err(|e| AppError::Parse(format!("in {name}(…): {e}")))
+            parse_value(a).map_err(|e| AppError::Parse(format!("in {name}(...): {e}")))
         })
         .collect()
 }
@@ -436,7 +521,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
 
     if !(s == "db" || s.starts_with("db.") || s.starts_with("db ")) {
         return Err(AppError::Parse(
-            "statements must start with db. — e.g. db.users.find({})".into(),
+            "statements must start with db. - e.g. db.users.find({})".into(),
         ));
     }
     if s == "db" {
@@ -465,7 +550,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
     if idx >= segments.len() {
         let path = coll_parts.join(".");
         return Err(AppError::Parse(format!(
-            "db.{path} is not a command — did you mean db.{path}.find({{}})?"
+            "db.{path} is not a command - did you mean db.{path}.find({{}})?"
         )));
     }
 
@@ -528,7 +613,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
             }
             other => {
                 return Err(AppError::Parse(format!(
-                    "db.{other}() is not supported — supported: stats, runCommand, adminCommand, \
+                    "db.{other}() is not supported - supported: stats, runCommand, adminCommand, \
                      createCollection, dropDatabase, getCollectionNames, getCollection, version"
                 )));
             }
@@ -540,7 +625,7 @@ pub fn parse_statement(input: &str) -> AppResult<Statement> {
         Segment::Call(n, r) => (n.clone(), parse_args(n, r)?),
         Segment::Plain(p) => {
             return Err(AppError::Parse(format!(
-                "expected a method call, found '.{p}' — did you mean .{p}()?"
+                "expected a method call, found '.{p}' - did you mean .{p}()?"
             )))
         }
     };
@@ -639,6 +724,18 @@ mod tests {
         assert_eq!(v, json!({"a": 5, "b": 5.5, "c": -3}));
         assert!(v["a"].is_i64());
         assert!(v["b"].is_f64());
+    }
+
+    #[test]
+    fn regex_helpers_and_literals() {
+        let v = parse_value(r#"{a: new RegExp("Hel\\d+", "i"), b: RegExp('x'), c: /he\/llo/gi, d: [/x/]}"#).unwrap();
+        assert_eq!(v["a"], json!({"$regularExpression": {"pattern": "Hel\\d+", "options": "i"}}));
+        assert_eq!(v["b"], json!({"$regularExpression": {"pattern": "x", "options": ""}}));
+        assert_eq!(v["c"], json!({"$regularExpression": {"pattern": "he\\/llo", "options": "gi"}}));
+        assert_eq!(v["d"][0], json!({"$regularExpression": {"pattern": "x", "options": ""}}));
+        // a slash inside a string or as division-ish text is left alone
+        let v = parse_value(r#"{path: "a/b", n: 1}"#).unwrap();
+        assert_eq!(v["path"], json!("a/b"));
     }
 
     #[test]

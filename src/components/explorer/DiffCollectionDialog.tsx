@@ -1,9 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ChevronDown, ChevronRight, GitCompare, Loader2, Server } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Server } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -12,9 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -45,7 +43,7 @@ interface DiffCollectionDialogProps {
 
 const idKey = (id: unknown) => JSON.stringify(id);
 
-/** One row in a category list: checkbox, id, optional expandable field diff. */
+/** One row in a category table: checkbox, id, optional expandable field diff. */
 function EntryRow({
   entry,
   checked,
@@ -67,54 +65,57 @@ function EntryRow({
   );
 
   return (
-    <div className="rounded-md border border-transparent hover:border-border">
-      <div className="flex items-center gap-2 px-2 py-1">
-        <Checkbox checked={checked} onCheckedChange={(v) => onCheck(v === true)} />
-        {expandable ? (
-          <button
-            onClick={() => setExpanded((e) => !e)}
-            className="flex min-w-0 flex-1 items-center gap-1 text-left"
-          >
-            {expanded ? (
-              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-            )}
-            <span className="truncate font-mono text-xs">{formatId(entry.id)}</span>
-          </button>
-        ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">
-            {formatId(entry.id)}
-          </span>
-        )}
-      </div>
+    <>
+      <tr className={cn(checked && "on")}>
+        <td className="chk">
+          <Checkbox checked={checked} onCheckedChange={(v) => onCheck(v === true)} />
+        </td>
+        <td>
+          {expandable ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="flex min-w-0 max-w-full items-center gap-1.5 text-left"
+            >
+              {expanded ? (
+                <ChevronDown className="h-3 w-3 shrink-0 text-text-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3 shrink-0 text-text-3" />
+              )}
+              <span className="oi truncate">{formatId(entry.id)}</span>
+            </button>
+          ) : (
+            <span className="oi truncate">{formatId(entry.id)}</span>
+          )}
+        </td>
+      </tr>
       {expanded && fields.length > 0 && (
-        <div className="mx-2 mb-1.5 overflow-x-auto rounded bg-muted/40 p-1.5">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="text-left text-muted-foreground">
-                <th className="pr-3 font-normal">Field</th>
-                <th className="pr-3 font-normal">Source</th>
-                <th className="font-normal">Target</th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {fields.map((f) => (
-                <tr key={f.path} className="align-top">
-                  <td className="pr-3 text-muted-foreground">{f.path}</td>
-                  <td className="whitespace-pre-wrap break-all pr-3 text-info">
-                    {previewValue(f.left)}
-                  </td>
-                  <td className="whitespace-pre-wrap break-all text-destructive">
-                    {previewValue(f.right)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <tr>
+          <td colSpan={2} className="!whitespace-normal !p-0">
+            <div className="tw max-h-[220px] border-b border-line bg-panel-2">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Source</th>
+                    <th>Target</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fields.map((f) => (
+                    <tr key={f.path} className="align-top">
+                      <td className="ky !whitespace-normal break-all">{f.path}</td>
+                      <td className="st !whitespace-pre-wrap break-all">{previewValue(f.left)}</td>
+                      <td className="!whitespace-pre-wrap break-all text-danger">{previewValue(f.right)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
       )}
-    </div>
+    </>
   );
 }
 
@@ -292,43 +293,47 @@ export function DiffCollectionDialog({
     empty: string,
     actions: React.ReactNode
   ) => (
-    <div className="flex h-[300px] flex-col">
+    <div className="flex h-[300px] flex-col overflow-hidden rounded-[var(--r-sm)] border border-line bg-panel">
       {entries.length === 0 ? (
-        <p className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-          {empty}
-        </p>
+        <p className="flex flex-1 items-center justify-center text-[12px] text-text-3">{empty}</p>
       ) : (
         <>
-          <div className="flex items-center gap-2 border-b px-2 py-1.5">
-            <Checkbox
-              checked={selected.size === entries.length && entries.length > 0}
-              onCheckedChange={(v) =>
-                setSelected(v === true ? allKeys(entries) : new Set())
-              }
-            />
-            <span className="text-xs text-muted-foreground">
-              {selected.size} of {entries.length} selected
-              {totalCount > entries.length &&
-                ` — showing first ${entries.length} of ${totalCount.toLocaleString()}`}
-            </span>
+          <div className="tw">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th className="chk">
+                    <Checkbox
+                      checked={selected.size === entries.length && entries.length > 0}
+                      onCheckedChange={(v) => setSelected(v === true ? allKeys(entries) : new Set())}
+                    />
+                  </th>
+                  <th>
+                    {selected.size} of {entries.length} selected
+                    {totalCount > entries.length &&
+                      `, showing first ${entries.length} of ${totalCount.toLocaleString()}`}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((e) => {
+                  const k = idKey(e.id);
+                  return (
+                    <EntryRow
+                      key={k}
+                      entry={e}
+                      checked={selected.has(k)}
+                      onCheck={(v) => setSelected(toggle(selected, k, v))}
+                      expandable={expandable}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <ScrollArea className="flex-1">
-            <div className="flex flex-col gap-px p-1">
-              {entries.map((e) => {
-                const k = idKey(e.id);
-                return (
-                  <EntryRow
-                    key={k}
-                    entry={e}
-                    checked={selected.has(k)}
-                    onCheck={(v) => setSelected(toggle(selected, k, v))}
-                    expandable={expandable}
-                  />
-                );
-              })}
-            </div>
-          </ScrollArea>
-          <div className="flex justify-end gap-2 border-t px-2 py-2">{actions}</div>
+          <div className="flex shrink-0 justify-end gap-2 border-t border-line bg-panel-2 px-3 py-2">
+            {actions}
+          </div>
         </>
       )}
     </div>
@@ -341,37 +346,30 @@ export function DiffCollectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && !syncing && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-[640px]">
+      <DialogContent className="max-w-[820px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GitCompare className="h-4 w-4" />
-            Diff collection
-          </DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              Compare <span className="font-mono font-medium text-foreground">{source}</span>{" "}
-              against another collection by <span className="font-mono">_id</span> — see what's
-              missing, extra, or changed, then sync selected documents.
-            </div>
+          <DialogTitle>Diff collection</DialogTitle>
+          <DialogDescription>
+            {database}.{source} · compare by _id, then sync selected documents
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">Compare with</Label>
+        <DialogBody>
+          <div className="three">
+            <div className="fld">
+              <label>Compare with</label>
               <Select value={targetWs} onValueChange={setTargetWs} disabled={busy}>
-                <SelectTrigger className="h-8">
+                <SelectTrigger className="font-sans">
                   <SelectValue placeholder="Connection" />
                 </SelectTrigger>
                 <SelectContent>
                   {workspaces.map((w) => (
                     <SelectItem key={w.info.id} value={w.info.id}>
-                      <span className="flex items-center gap-1.5">
-                        <Server className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="flex items-center gap-1.5 font-sans">
+                        <Server className="h-3.5 w-3.5 text-text-3" />
                         {w.info.name}
                         {w.info.id === activeId && (
-                          <span className="text-[10px] text-muted-foreground">(current)</span>
+                          <span className="font-mono text-[10px] text-text-3">(current)</span>
                         )}
                       </span>
                     </SelectItem>
@@ -379,10 +377,10 @@ export function DiffCollectionDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">Database</Label>
+            <div className="fld">
+              <label>Database</label>
               <Select value={targetDb} onValueChange={setTargetDb} disabled={busy}>
-                <SelectTrigger className="h-8 font-mono">
+                <SelectTrigger>
                   <SelectValue placeholder="Database" />
                 </SelectTrigger>
                 <SelectContent>
@@ -394,10 +392,10 @@ export function DiffCollectionDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-normal text-muted-foreground">Collection</Label>
+            <div className="fld">
+              <label>Collection</label>
               <Select value={targetColl} onValueChange={setTargetColl} disabled={busy}>
-                <SelectTrigger className="h-8 font-mono">
+                <SelectTrigger>
                   <SelectValue placeholder="Collection" />
                 </SelectTrigger>
                 <SelectContent>
@@ -411,96 +409,88 @@ export function DiffCollectionDialog({
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor={filterId} className="text-xs font-normal text-muted-foreground">
-              Filter <span className="text-muted-foreground/60">(optional — applied to both sides)</span>
-            </Label>
-            <Input
+          <div className="fld">
+            <label htmlFor={filterId}>Filter</label>
+            <input
               id={filterId}
+              className="in"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder='{ status: "active" }'
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
-              className="h-8 font-mono"
             />
+            <div className="hint">Optional, applied to both sides.</div>
           </div>
 
           {sameTarget && (
-            <p className="text-xs text-destructive">
+            <div className="notice dgr">
               Pick a different connection, database, or collection to compare against.
-            </p>
+            </div>
           )}
 
           {busy && progress && (
-            <div className="space-y-1">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                {pct === null ? (
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-                ) : (
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width]"
-                    style={{ width: `${pct}%` }}
-                  />
-                )}
+            <div className="notice acc">
+              <Loader2 className="spin" />
+              <div className="min-w-0 flex-1">
+                <div className="mono tabular-nums">
+                  {progress.phase === "source" ? "Scanning source" : "Scanning target"} -{" "}
+                  {progress.processed.toLocaleString()}
+                  {progress.total ? ` / ${progress.total.toLocaleString()}` : ""} documents
+                </div>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+                  {pct === null ? (
+                    <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+                  ) : (
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  )}
+                </div>
               </div>
-              <p className="text-xs tabular-nums text-muted-foreground">
-                {progress.phase === "source" ? "Scanning source" : "Scanning target"} —{" "}
-                {progress.processed.toLocaleString()}
-                {progress.total ? ` / ${progress.total.toLocaleString()}` : ""} documents
-              </p>
             </div>
           )}
 
           {result && (
             <>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-xs tabular-nums">
-                <span className="text-muted-foreground">
-                  <span className="font-medium text-foreground">
-                    {result.identical.toLocaleString()}
-                  </span>{" "}
-                  identical
-                </span>
-                <span className="text-muted-foreground">
-                  <span className={cn("font-medium", result.changed > 0 && "text-warning")}>
+              <div className="statgrid">
+                <div>
+                  <div className="l">Identical</div>
+                  <div className="v mono">{result.identical.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="l">Changed</div>
+                  <div className={cn("v mono", result.changed > 0 && "text-warn")}>
                     {result.changed.toLocaleString()}
-                  </span>{" "}
-                  changed
-                </span>
-                <span className="text-muted-foreground">
-                  <span
-                    className={cn("font-medium", result.onlyInSource > 0 && "text-info")}
-                  >
+                  </div>
+                </div>
+                <div>
+                  <div className="l">Only in source</div>
+                  <div className={cn("v mono", result.onlyInSource > 0 && "text-accent-2")}>
                     {result.onlyInSource.toLocaleString()}
-                  </span>{" "}
-                  only in source
-                </span>
-                <span className="text-muted-foreground">
-                  <span
-                    className={cn("font-medium", result.onlyInTarget > 0 && "text-destructive")}
-                  >
+                  </div>
+                </div>
+                <div>
+                  <div className="l">Only in target</div>
+                  <div className={cn("v mono", result.onlyInTarget > 0 && "text-danger")}>
                     {result.onlyInTarget.toLocaleString()}
-                  </span>{" "}
-                  only in target
-                </span>
-                <span className="ml-auto text-muted-foreground/70">{result.execMs} ms</span>
+                  </div>
+                </div>
               </div>
+              <div className="-mt-2 text-right font-mono text-[10.5px] text-text-3">{result.execMs} ms</div>
 
               <Tabs defaultValue="changed">
-                <TabsList className="h-8">
-                  <TabsTrigger value="changed" className="text-xs">
-                    Changed ({result.changed.toLocaleString()})
-                  </TabsTrigger>
-                  <TabsTrigger value="missing" className="text-xs">
+                <TabsList>
+                  <TabsTrigger value="changed">Changed ({result.changed.toLocaleString()})</TabsTrigger>
+                  <TabsTrigger value="missing">
                     Only in source ({result.onlyInSource.toLocaleString()})
                   </TabsTrigger>
-                  <TabsTrigger value="extra" className="text-xs">
-                    Only in target ({result.onlyInTarget.toLocaleString()})
-                  </TabsTrigger>
+                  <TabsTrigger value="extra">Only in target ({result.onlyInTarget.toLocaleString()})</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="changed" className="mt-2 rounded-md border">
+                <TabsContent value="changed">
                   {category(
                     result.changedDocs,
                     result.changed,
@@ -530,7 +520,7 @@ export function DiffCollectionDialog({
                   )}
                 </TabsContent>
 
-                <TabsContent value="missing" className="mt-2 rounded-md border">
+                <TabsContent value="missing">
                   {category(
                     result.onlyInSourceDocs,
                     result.onlyInSource,
@@ -547,13 +537,13 @@ export function DiffCollectionDialog({
                         )
                       }
                     >
-                      {syncing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {syncing && <Loader2 className="spin" />}
                       Copy selected to target
                     </Button>
                   )}
                 </TabsContent>
 
-                <TabsContent value="extra" className="mt-2 rounded-md border">
+                <TabsContent value="extra">
                   {category(
                     result.onlyInTargetDocs,
                     result.onlyInTarget,
@@ -585,27 +575,27 @@ export function DiffCollectionDialog({
               </Tabs>
 
               {result.truncated && (
-                <p className="text-xs text-muted-foreground">
-                  Detail lists are capped at 200 entries per category — counts are complete.
-                  Sync applies to the listed entries; re-run the diff to work through the rest.
-                </p>
+                <div className="hint">
+                  Detail lists are capped at 200 entries per category, counts are complete. Sync applies to
+                  the listed entries; re-run the diff to work through the rest.
+                </div>
               )}
             </>
           )}
-        </div>
+        </DialogBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter>
           {busy ? (
-            <Button variant="outline" size="sm" onClick={cancel}>
+            <Button variant="outline" onClick={cancel}>
               Cancel diff
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close
             </Button>
           )}
-          <Button size="sm" disabled={!canRun} onClick={() => void runDiff()}>
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Button disabled={!canRun} onClick={() => void runDiff()}>
+            {busy && <Loader2 className="spin" />}
             {result ? "Re-run diff" : "Run diff"}
           </Button>
         </DialogFooter>

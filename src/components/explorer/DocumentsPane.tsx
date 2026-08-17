@@ -1,141 +1,73 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  AlertCircle,
-  ChevronLeft,
-  ChevronRight,
-  EllipsisVertical,
-  FileJson2,
-  Gauge,
-  Loader2,
-  Pencil,
-  Play,
-  Plus,
-  RotateCcw,
-  Trash2,
-  SlidersHorizontal,
-  Table2,
-  Upload,
-  ListFilter,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  ResultsViewer,
-  docSelectionKey,
-  type DocSelection,
-} from "@/components/explorer/ResultsViewer";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
-import { BulkDeleteDialog, BulkUpdateDialog } from "@/components/explorer/BulkDialogs";
-import { QueryBuilder } from "@/components/explorer/QueryBuilder";
-import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
-import { useExplorer, type Tab, type ViewMode } from "@/stores/explorer";
-import { formatCount } from "@/lib/bson";
-import { exportCollection, importDocuments } from "@/lib/files";
-import { api, errMsg, type Doc } from "@/lib/api";
+import { AlertCircle, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { save } from "@tauri-apps/plugin-dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { ResultsViewer, docSelectionKey, type DocSelection } from "@/components/explorer/ResultsViewer";
+import { CheckRow } from "@/components/ui/check-row";
+import { Blank } from "@/components/layout/Blank";
+import { useExplorer, type Tab } from "@/stores/explorer";
+import { useSettings } from "@/stores/settings";
+import { useConnections } from "@/stores/connections";
+import { api, errMsg, type Doc } from "@/lib/api";
+import { runExport } from "@/lib/files";
+import { toShellText } from "@/lib/bson";
+import { formatCount } from "@/lib/bson";
 
-export function ViewToggle({
-  view,
-  onChange,
-}: {
-  view: ViewMode;
-  onChange: (view: ViewMode) => void;
-}) {
-  return (
-    <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
-      {(
-        [
-          { id: "json", icon: FileJson2, label: "JSON" },
-          { id: "table", icon: Table2, label: "Table" },
-        ] as const
-      ).map((v) => (
-        <button
-          key={v.id}
-          onClick={() => onChange(v.id)}
-          className={cn(
-            "flex items-center gap-1 rounded-[5px] px-2 py-0.5 text-xs font-medium transition-colors",
-            view === v.id
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <v.icon className="h-3.5 w-3.5" />
-          {v.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
+/**
+ * Find results for the Table / Documents views. The query itself lives in
+ * the dock below; this pane renders results, the multi-select bar and errors.
+ * Clicking a row opens it in the drawer.
+ */
 export function DocumentsPane({ tab }: { tab: Tab }) {
   const patchDocs = useExplorer((s) => s.patchDocs);
   const runFind = useExplorer((s) => s.runFind);
-  const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
-  const [builderOpen, setBuilderOpen] = useState(false);
-  const [explain, setExplain] = useState<ExplainRequest | null>(null);
-  const [explainOpen, setExplainOpen] = useState(false);
-  const d = tab.docs;
-
-  const run = (resetPage: boolean) => void runFind(tab.id, { resetPage });
-  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-
-  const openExplain = () => {
-    setExplain({
-      database: tab.database,
-      collection: tab.collection,
-      filter: d.filter,
-      sort: d.sort,
-      projection: d.projection,
-    });
-    setExplainOpen(true);
-  };
-
-  const hasMore =
-    d.count !== null ? (d.page + 1) * d.limit < d.count : d.docs.length === d.limit;
-  const from = d.page * d.limit + 1;
-  const to = d.page * d.limit + d.docs.length;
-
-  // Stable identity so the memoized ResultsViewer doesn't re-render the result
-  // list on every keystroke in the filter / sort / projection inputs.
-  const actions = useMemo(
-    () => ({
-      onView: (doc: Doc) => setDialog({ type: "view", doc }),
-      onEdit: (doc: Doc) => setDialog({ type: "edit", doc }),
-      onDuplicate: (doc: Doc) => setDialog({ type: "insert", template: doc }),
-      onDelete: (doc: Doc) => setDialog({ type: "delete", doc }),
-    }),
-    []
+  const setDrawer = useExplorer((s) => s.setDrawer);
+  const readOnly = useConnections(
+    (s) => s.workspaces.find((w) => w.info.id === s.activeId)?.readOnly ?? false
   );
+  const offerBackup = useSettings((s) => s.offerBackupOnDelete);
+  const d = tab.docs;
+  const view = tab.mode === "documents" ? "json" : "table";
 
-  // ── Multi-select (table view): keys are JSON.stringify(doc._id) ──────────
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmSelected, setConfirmSelected] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
+  const [backupSelected, setBackupSelected] = useState(false);
+  const [confirmOne, setConfirmOne] = useState<Doc | null>(null);
 
-  // A new result set invalidates the selection (page change, re-run, edits).
+  const run = (resetPage: boolean) => void runFind(tab.id, { resetPage });
+
+  // Stable identity so the memoized ResultsViewer doesn't re-render on every
+  // keystroke in the dock.
+  // Table rows open the drawer on Fields; document cards open it on JSON.
+  const initialView = view === "json" ? "json" : "fields";
+  const actions = useMemo(
+    () => ({
+      onView: (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs", view: initialView }),
+      onEdit: readOnly
+        ? undefined
+        : (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs", view: initialView }),
+      onDuplicate: readOnly ? undefined : (doc: Doc) => setDrawer(tab.id, { kind: "insert", template: doc }),
+      onDelete: readOnly ? undefined : (doc: Doc) => setConfirmOne(doc),
+    }),
+    [tab.id, setDrawer, readOnly, initialView]
+  );
+
+  const selectedDoc = tab.drawer.kind === "doc" ? tab.drawer.doc : null;
+  const selectedKey = selectedDoc ? docSelectionKey(selectedDoc) : null;
+
+  // ---- multi-select (table view) ------------------------------------------
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   useEffect(() => setSelected(new Set()), [d.docs]);
-
   const selection: DocSelection = useMemo(
     () => ({
       selected,
@@ -159,22 +91,46 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
     [selected]
   );
 
-  const deleteSelected = async () => {
-    const ids = d.docs
+  const selectedIds = () =>
+    d.docs
       .filter((doc) => {
         const k = docSelectionKey(doc);
         return k !== null && selected.has(k);
       })
       .map((doc) => doc._id);
+
+  const deleteSelected = async () => {
+    const ids = selectedIds();
     if (ids.length === 0) return;
     setDeletingSelected(true);
     try {
-      const r = await api.bulkDelete(
-        tab.database,
-        tab.collection,
-        JSON.stringify({ _id: { $in: ids } })
-      );
-      toast.success(`Deleted ${r.deleted.toLocaleString()} document${r.deleted === 1 ? "" : "s"}`);
+      const filter = toShellText({ _id: { $in: ids } });
+      if (backupSelected) {
+        const path = await save({
+          title: `Backup ${ids.length} document${ids.length === 1 ? "" : "s"} before deleting`,
+          defaultPath: `${tab.collection}-${ids.length}-docs.json`,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        }).catch(() => null);
+        if (!path) {
+          toast.info("Delete cancelled - no backup was written");
+          setDeletingSelected(false);
+          return;
+        }
+        const out = await runExport({
+          database: tab.database,
+          collection: tab.collection,
+          filter,
+          sort: "",
+          format: "json",
+          path,
+        });
+        if (!out || out.canceled) {
+          setDeletingSelected(false);
+          return;
+        }
+      }
+      const r = await api.bulkDelete(tab.database, tab.collection, filter);
+      toast.success(`Deleted ${formatCount(r.deleted)} document${r.deleted === 1 ? "" : "s"}`);
       setConfirmSelected(false);
       setSelected(new Set());
       run(false);
@@ -185,389 +141,176 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
     }
   };
 
-  const optionsActive = d.sort.trim() !== "" || d.projection.trim() !== "";
+  const [deletingOne, setDeletingOne] = useState(false);
+  const deleteOne = async () => {
+    if (!confirmOne) return;
+    setDeletingOne(true);
+    try {
+      await api.deleteDocument(tab.database, tab.collection, confirmOne._id);
+      toast.success("Document deleted");
+      if (selectedKey && selectedKey === docSelectionKey(confirmOne)) setDrawer(tab.id, { kind: "closed" });
+      setConfirmOne(null);
+      run(false);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setDeletingOne(false);
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* query bar */}
-      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <Input
-          value={d.filter}
-          onChange={(e) => patchDocs(tab.id, { filter: e.target.value })}
-          onKeyDown={(e) => e.key === "Enter" && run(true)}
-          placeholder={`{ field: "value" }   — ObjectId(…), ISODate(…), $gte… all work`}
-          className="h-8 flex-1 font-mono text-xs"
-          spellCheck={false}
-        />
-
-        <Popover open={builderOpen} onOpenChange={setBuilderOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
-                  <ListFilter className="h-3.5 w-3.5" />
-                  Build
-                </Button>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Visual query builder</TooltipContent>
-          </Tooltip>
-          <PopoverContent align="start" className="w-auto">
-            <QueryBuilder
-              database={tab.database}
-              collection={tab.collection}
-              onApply={(filter) => {
-                patchDocs(tab.id, { filter });
-                setBuilderOpen(false);
-                void runFind(tab.id, { resetPage: true });
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn("h-8 gap-1.5 text-xs", optionsActive && "border-primary/50 text-primary")}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Options
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Sort</Label>
-              <Input
-                value={d.sort}
-                onChange={(e) => patchDocs(tab.id, { sort: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && run(true)}
-                placeholder="{ createdAt: -1 }"
-                className="h-8 font-mono text-xs"
-                spellCheck={false}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Projection</Label>
-              <Input
-                value={d.projection}
-                onChange={(e) => patchDocs(tab.id, { projection: e.target.value })}
-                onKeyDown={(e) => e.key === "Enter" && run(true)}
-                placeholder="{ name: 1, email: 1 }"
-                className="h-8 font-mono text-xs"
-                spellCheck={false}
-              />
-            </div>
-            <Button size="sm" className="w-full" onClick={() => run(true)}>
-              Apply
-            </Button>
-          </PopoverContent>
-        </Popover>
-
-        <Button size="sm" className="h-8 gap-1.5" onClick={() => run(true)} disabled={d.loading}>
-          {d.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-          Run
-        </Button>
-
-        {(d.filter || optionsActive) && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => {
-                  patchDocs(tab.id, { filter: "", sort: "", projection: "" });
-                  void runFind(tab.id, { resetPage: true });
-                }}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Clear query</TooltipContent>
-          </Tooltip>
-        )}
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={openExplain}>
-              <Gauge className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Explain plan — index usage & timing</TooltipContent>
-        </Tooltip>
-
-        <div className="mx-1 h-5 w-px bg-border" />
-
-        <ViewToggle view={d.view} onChange={(view) => patchDocs(tab.id, { view })} />
-
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <EllipsisVertical className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Collection actions — export, import, bulk edit</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Export {d.filter.trim() ? "(current filter)" : "all"}</DropdownMenuLabel>
-            <DropdownMenuItem
-              className="gap-2"
-              onClick={() =>
-                void exportCollection({
-                  database: tab.database,
-                  collection: tab.collection,
-                  filter: d.filter,
-                  sort: d.sort,
-                  format: "json",
-                })
-              }
-            >
-              <FileJson2 className="h-3.5 w-3.5" />
-              Export as JSON
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="gap-2"
-              onClick={() =>
-                void exportCollection({
-                  database: tab.database,
-                  collection: tab.collection,
-                  filter: d.filter,
-                  sort: d.sort,
-                  format: "csv",
-                })
-              }
-            >
-              <Table2 className="h-3.5 w-3.5" />
-              Export as CSV
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="gap-2"
-              onClick={() =>
-                void exportCollection({
-                  database: tab.database,
-                  collection: tab.collection,
-                  filter: d.filter,
-                  sort: d.sort,
-                  format: "ndjson",
-                })
-              }
-            >
-              <FileJson2 className="h-3.5 w-3.5" />
-              Export as NDJSON
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="gap-2"
-              onClick={() =>
-                void exportCollection({
-                  database: tab.database,
-                  collection: tab.collection,
-                  filter: d.filter,
-                  sort: d.sort,
-                  format: "bson",
-                })
-              }
-            >
-              <FileJson2 className="h-3.5 w-3.5" />
-              Export as BSON (mongodump)
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Import</DropdownMenuLabel>
-            <DropdownMenuItem
-              className="gap-2"
-              onClick={() =>
-                void importDocuments(tab.database, tab.collection).then(
-                  (ok) => ok && run(false)
-                )
-              }
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Import documents (JSON / CSV / BSON)…
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>
-              Bulk edit {d.filter.trim() ? "(current filter)" : "(no filter)"}
-            </DropdownMenuLabel>
-            <DropdownMenuItem className="gap-2" onClick={() => setBulkUpdateOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" />
-              Bulk update matching…
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="gap-2 text-destructive focus:text-destructive"
-              onClick={() => setBulkDeleteOpen(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Bulk delete matching…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <BulkUpdateDialog
-          open={bulkUpdateOpen}
-          database={tab.database}
-          collection={tab.collection}
-          filter={d.filter}
-          onOpenChange={setBulkUpdateOpen}
-          onDone={() => run(false)}
-        />
-        <BulkDeleteDialog
-          open={bulkDeleteOpen}
-          database={tab.database}
-          collection={tab.collection}
-          filter={d.filter}
-          onOpenChange={setBulkDeleteOpen}
-          onDone={() => run(true)}
-        />
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 text-xs"
-          onClick={() => setDialog({ type: "insert" })}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Insert
-        </Button>
-      </div>
-
-      {/* error */}
       {d.error && (
-        <div className="mx-3 mt-2 flex shrink-0 items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="break-all font-mono">{d.error}</span>
+        <div className="notice dgr mono mx-[var(--pad)] mt-3 shrink-0">
+          <AlertCircle />
+          <span className="min-w-0 flex-1 break-all">{d.error}</span>
         </div>
       )}
 
-      {/* selection action bar (table view multi-select) */}
       {selected.size > 0 && (
-        <div className="mx-3 mt-2 flex shrink-0 items-center gap-3 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs">
-          <span className="font-medium tabular-nums">
+        <div className="notice acc mx-[var(--pad)] mt-3 shrink-0 items-center py-1.5 no-select">
+          <span className="font-mono text-[11.5px] text-text">
             {selected.size} document{selected.size === 1 ? "" : "s"} selected
           </span>
-          <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => setSelected(new Set())}
-          >
+          <div className="grow" />
+          <button className="btn qt sm" onClick={() => setSelected(new Set())}>
             Clear
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-6 gap-1.5 px-2 text-xs"
-            onClick={() => setConfirmSelected(true)}
+          </button>
+          <button
+            className="btn dgr sm"
+            disabled={readOnly}
+            onClick={() => {
+              setBackupSelected(false);
+              setConfirmSelected(true);
+            }}
           >
-            <Trash2 className="h-3 w-3" />
-            Delete selected
-          </Button>
+            <Trash2 />
+            Delete {selected.size}
+          </button>
         </div>
       )}
 
-      {/* results */}
       {d.loading && d.docs.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Loader2 className="spin h-5 w-5 text-text-3" />
         </div>
+      ) : d.docs.length === 0 && !d.loading ? (
+        <Blank
+          small
+          title={d.filter.trim() ? "No documents match this filter" : "This collection is empty"}
+          text={
+            d.filter.trim() ? (
+              <>
+                Nothing in <span className="mono">{tab.collection}</span> matches{" "}
+                <span className="mono">{d.filter.trim()}</span>. Loosen the filter or check field names and
+                types.
+              </>
+            ) : readOnly ? (
+              "Switch to edit mode to insert the first document."
+            ) : (
+              "Insert adds the first document, or import a JSON / CSV / BSON file."
+            )
+          }
+          actions={
+            d.filter.trim() ? (
+              <>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    patchDocs(tab.id, { filter: "" });
+                    run(true);
+                  }}
+                >
+                  Clear filter
+                </button>
+                <button
+                  className="btn qt"
+                  onClick={() => document.querySelector<HTMLTextAreaElement>('.dock [aria-label="Filter"] textarea')?.focus()}
+                >
+                  Edit filter
+                </button>
+              </>
+            ) : !readOnly ? (
+              <button className="btn pri" onClick={() => setDrawer(tab.id, { kind: "insert" })}>
+                Insert a document
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <ResultsViewer
           docs={d.docs}
-          view={d.view}
+          view={view}
           actions={actions}
-          selection={d.view === "table" ? selection : undefined}
-          emptyText={
-            d.filter.trim()
-              ? "No documents match this filter"
-              : "This collection is empty — Insert adds the first document"
-          }
+          selection={view === "table" ? selection : undefined}
+          activeKey={selectedKey}
         />
       )}
 
-      <ConfirmDialog
-        open={confirmSelected}
-        onOpenChange={(o) => !o && !deletingSelected && setConfirmSelected(false)}
-        title={`Delete ${selected.size} selected document${selected.size === 1 ? "" : "s"}?`}
-        description="The selected documents are permanently removed from the collection. This cannot be undone."
-        confirmLabel={`Delete ${selected.size}`}
-        destructive
-        busy={deletingSelected}
-        onConfirm={deleteSelected}
-      />
+      {/* delete selected */}
+      <Dialog open={confirmSelected} onOpenChange={(o) => !o && !deletingSelected && setConfirmSelected(false)}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Delete {selected.size} selected document{selected.size === 1 ? "" : "s"}?</DialogTitle>
+            <DialogDescription>
+              {tab.database}.{tab.collection}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <div className="warnbox">
+              <Trash2 />
+              <div>
+                The selected documents are permanently removed from the collection. It cannot be undone
+                from Ognom.
+              </div>
+            </div>
+            {offerBackup && (
+              <CheckRow on={backupSelected} onChange={setBackupSelected}>
+                Export the selected documents to a JSON file first
+              </CheckRow>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" disabled={deletingSelected} onClick={() => setConfirmSelected(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={deletingSelected} onClick={() => void deleteSelected()}>
+              {deletingSelected && <Loader2 className="spin" />}
+              Delete {selected.size}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* pagination */}
-      <div className="no-select flex h-9 shrink-0 items-center gap-2 border-t px-3 text-xs text-muted-foreground">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          disabled={d.page === 0 || d.loading}
-          onClick={() => {
-            patchDocs(tab.id, { page: d.page - 1 });
-            run(false);
-          }}
-        >
-          <ChevronLeft className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          disabled={!hasMore || d.loading}
-          onClick={() => {
-            patchDocs(tab.id, { page: d.page + 1 });
-            run(false);
-          }}
-        >
-          <ChevronRight className="h-3.5 w-3.5" />
-        </Button>
-        <span className="tabular-nums">
-          {d.docs.length > 0 ? `${formatCount(from)}–${formatCount(to)}` : "0"}
-          {d.count !== null && (
-            <>
-              {" of "}
-              {d.countExact ? "" : "~"}
-              {formatCount(d.count)}
-            </>
-          )}
-        </span>
-
-        <div className="flex-1" />
-
-        {d.execMs !== null && <span className="tabular-nums">{d.execMs}ms</span>}
-        <Select
-          value={String(d.limit)}
-          onValueChange={(v) => {
-            patchDocs(tab.id, { limit: Number(v) });
-            run(true);
-          }}
-        >
-          <SelectTrigger className="h-6 w-[88px] text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {[10, 25, 50, 100, 500].map((n) => (
-              <SelectItem key={n} value={String(n)}>
-                {n} / page
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <DocumentDialogs
-        database={tab.database}
-        collection={tab.collection}
-        state={dialog}
-        onClose={() => setDialog({ type: "closed" })}
-        onMutated={() => run(false)}
-      />
-
-      <ExplainSheet request={explain} open={explainOpen} onOpenChange={setExplainOpen} />
+      {/* delete one */}
+      <Dialog open={!!confirmOne} onOpenChange={(o) => !o && !deletingOne && setConfirmOne(null)}>
+        <DialogContent className="max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Delete document?</DialogTitle>
+            <DialogDescription>
+              {tab.database}.{tab.collection}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <div className="warnbox">
+              <Trash2 />
+              <div>
+                <span className="mono">_id {confirmOne ? toShellText(confirmOne._id) : ""}</span> will be removed.
+                It cannot be undone from Ognom.
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" disabled={deletingOne} onClick={() => setConfirmOne(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={deletingOne} onClick={() => void deleteOne()}>
+              {deletingOne && <Loader2 className="spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,21 +1,15 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Copy, Loader2, RefreshCw } from "lucide-react";
 import {
-  Activity,
-  Clock,
-  Copy,
-  Cpu,
-  Database,
-  Layers,
-  Loader2,
-  Network,
-  Plug,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-  type LucideIcon,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useConnections } from "@/stores/connections";
 import { api, errMsg, type ServerInfoRaw } from "@/lib/api";
@@ -64,36 +58,45 @@ function formatUptime(seconds: number | null): string | null {
 
 type Row = [string, ReactNode];
 
-function Section({
-  icon: Icon,
-  title,
-  rows = [],
-  children,
-}: {
-  icon: LucideIcon;
-  title: string;
-  rows?: Row[];
-  children?: ReactNode;
-}) {
-  const visible = rows.filter(([, v]) => v !== null && v !== undefined && v !== "");
+const present = (rows: Row[]) => rows.filter(([, v]) => v !== null && v !== undefined && v !== "");
+
+/** Uppercase mono label + a .card of key/value rows. */
+function Section({ title, rows = [], children }: { title: string; rows?: Row[]; children?: ReactNode }) {
+  const visible = present(rows);
   if (visible.length === 0 && !children) return null;
   return (
-    <div className="rounded-lg border bg-card/40 p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-        <Icon className="h-3.5 w-3.5 text-primary" />
-        {title}
+    <div className="fld">
+      <label>{title}</label>
+      <div className="card">
+        {visible.map(([label, value]) => (
+          <div key={label} className="row">
+            <div className="l">
+              <b>{label}</b>
+            </div>
+            <div className="rr mono min-w-0 max-w-[65%] break-all text-right text-[12px] text-text">{value}</div>
+          </div>
+        ))}
+        {children}
       </div>
-      {visible.length > 0 && (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[12px]">
-          {visible.map(([label, value]) => (
-            <Fragment key={label}>
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd className="break-all text-right font-mono text-foreground/90">{value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      )}
-      {children}
+    </div>
+  );
+}
+
+/** Uppercase mono label + .statgrid tiles. */
+function StatSection({ title, rows, five }: { title: string; rows: Row[]; five?: boolean }) {
+  const visible = present(rows);
+  if (visible.length === 0) return null;
+  return (
+    <div className="fld">
+      <label>{title}</label>
+      <div className={five ? "statgrid five" : "statgrid"}>
+        {visible.map(([label, value]) => (
+          <div key={label}>
+            <div className="l">{label}</div>
+            <div className="v mono truncate tabular-nums">{value}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -130,73 +133,48 @@ export function ServerInfoDialog({ open, onOpenChange }: ServerInfoDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[540px]">
-        {/* header */}
-        <div className="flex items-start gap-3 border-b px-5 py-4 pr-12">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
-            <Server className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <DialogTitle className="text-base">
-              MongoDB {active?.serverVersion ?? ""}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              Detailed MongoDB server status, build, and deployment information.
-            </DialogDescription>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {active?.topology}
-              {active?.hostSummary ? ` · ${active.hostSummary}` : ""}
-            </p>
-          </div>
-        </div>
+      <DialogContent className="max-w-[720px]">
+        <DialogHeader>
+          <DialogTitle>MongoDB {active?.serverVersion ?? ""}</DialogTitle>
+          <DialogDescription className="truncate">
+            {active?.topology}
+            {active?.hostSummary ? ` · ${active.hostSummary}` : ""}
+          </DialogDescription>
+        </DialogHeader>
 
-        {/* body */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-2.5 px-5 py-4">
-            {loading && (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Reading server status…
-              </div>
-            )}
+        <DialogBody>
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-12 text-[12.5px] text-text-3">
+              <Loader2 className="spin h-4 w-4 text-text-3" />
+              Reading server status...
+            </div>
+          )}
 
-            {error && !loading && (
-              <div className="flex flex-col items-center gap-3 py-8 text-center">
-                <p className="max-w-sm text-sm text-muted-foreground">{error}</p>
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={load}>
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Retry
-                </Button>
-              </div>
-            )}
+          {error && !loading && (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <div className="notice dgr mono max-w-md">{error}</div>
+              <Button variant="outline" size="sm" onClick={load}>
+                <RefreshCw />
+                Retry
+              </Button>
+            </div>
+          )}
 
-            {!loading && !error && raw && <Body raw={raw} fallbackVersion={active?.serverVersion} fallbackTopology={active?.topology} />}
-          </div>
-        </div>
+          {!loading && !error && raw && (
+            <Body raw={raw} fallbackVersion={active?.serverVersion} fallbackTopology={active?.topology} />
+          )}
+        </DialogBody>
 
-        {/* footer */}
-        <div className="flex items-center justify-between gap-2 border-t bg-card/40 px-5 py-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-muted-foreground"
-            disabled={!raw}
-            onClick={() => void copyJson()}
-          >
-            <Copy className="h-3.5 w-3.5" />
+        <DialogFooter className="justify-between">
+          <Button variant="ghost" size="sm" disabled={!raw} onClick={() => void copyJson()}>
+            <Copy />
             Copy as JSON
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={loading}
-            onClick={load}
-          >
-            <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+          <Button variant="outline" size="sm" disabled={loading} onClick={load}>
+            {loading ? <Loader2 className="spin h-4 w-4 text-text-3" /> : <RefreshCw />}
             Refresh
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -225,7 +203,7 @@ function Body({
     .filter(Boolean) as string[];
   const buildRows: Row[] = [
     ["Version", str(bi.version) ?? fallbackVersion ?? null],
-    ["Git revision", git ? `${git.slice(0, 12)}…` : null],
+    ["Git revision", git ? `${git.slice(0, 12)}...` : null],
     ["Storage engine", str(obj(ss.storageEngine).name)],
     ["JS engine", str(bi.javascriptEngine)],
     ["Allocator", str(bi.allocator)],
@@ -247,7 +225,7 @@ function Body({
     ["Topology", fallbackTopology ?? null],
     ["Replica set", str(hello.setName)],
     ["Current node", me],
-    ["Wire protocol", minW !== null && maxW !== null ? `v${minW}–v${maxW}` : null],
+    ["Wire protocol", minW !== null && maxW !== null ? `v${minW}-v${maxW}` : null],
     ["Read only", hello.readOnly === true ? "yes" : null],
   ];
 
@@ -322,25 +300,22 @@ function Body({
 
   return (
     <>
-      <Section icon={Database} title="Build" rows={buildRows} />
+      <StatSection title="Connections" rows={connRows} />
+      <StatSection title="Operations (since start)" rows={opRows} />
 
-      <Section icon={Layers} title="Deployment" rows={deployRows}>
+      <Section title="Build" rows={buildRows} />
+
+      <Section title="Deployment" rows={deployRows}>
         {hosts.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1 border-t pt-2 text-[12px]">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {hosts.length === 1 ? "Host" : `${hosts.length} hosts`}
-            </span>
+          <div className="flex flex-col gap-2 px-[14px] py-3">
+            <span className="lbl">{hosts.length === 1 ? "Host" : `${hosts.length} hosts`}</span>
             {hosts.map((h) => (
-              <div key={h} className="flex items-center justify-between gap-2 font-mono">
-                <span className="break-all text-foreground/90">{h}</span>
+              <div key={h} className="flex items-center justify-between gap-2 font-mono text-[12px]">
+                <span className="break-all text-text">{h}</span>
                 {h === primary ? (
-                  <span className="shrink-0 rounded bg-primary/15 px-1.5 py-px text-[10px] font-medium text-primary">
-                    primary
-                  </span>
+                  <span className="pill acc">primary</span>
                 ) : h === me ? (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
-                    connected
-                  </span>
+                  <span className="pill">connected</span>
                 ) : null}
               </div>
             ))}
@@ -348,14 +323,11 @@ function Body({
         )}
       </Section>
 
-      <Section icon={Cpu} title="Host system" rows={hostRows} />
-      <Section icon={Clock} title="Runtime" rows={runtimeRows} />
-      <Section icon={Plug} title="Connections" rows={connRows} />
-      <Section icon={Activity} title="Operations (since start)" rows={opRows} />
-      <Section icon={Network} title="Network" rows={netRows} />
+      <Section title="Host system" rows={hostRows} />
+      <Section title="Runtime" rows={runtimeRows} />
+      <StatSection title="Network" rows={netRows} />
 
       <Section
-        icon={ShieldCheck}
         title="Authentication"
         rows={[
           ["User", users.length ? users.join(", ") : "unauthenticated"],

@@ -12,7 +12,7 @@ export interface FieldDiff {
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** ExtJSON wrappers ({$oid}, {$date}, …) compare as leaves, not as objects. */
+/** ExtJSON wrappers ({$oid}, {$date}, ...) compare as leaves, not as objects. */
 const isExtJsonLeaf = (v: Record<string, unknown>): boolean => {
   const keys = Object.keys(v);
   return keys.length > 0 && keys.every((k) => k.startsWith("$"));
@@ -66,7 +66,7 @@ export function diffDocs(
 
 /** Compact one-line rendering of a diff value for list rows. */
 export function previewValue(v: unknown): string {
-  if (v === undefined) return "—";
+  if (v === undefined) return " - ";
   if (isPlainObject(v)) {
     if ("$oid" in v) return `ObjectId(${String(v.$oid)})`;
     if ("$date" in v) {
@@ -77,7 +77,7 @@ export function previewValue(v: unknown): string {
     }
   }
   const s = JSON.stringify(v);
-  return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+  return s.length > 80 ? `${s.slice(0, 77)}...` : s;
 }
 
 /** Display string for a diff entry's `_id` (extJSON form). */

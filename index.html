@@ -1,10 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="mongo-dark" data-density="comfortable">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ognom</title>
+    <script>
+      // Paint the saved theme before React mounts so there is no flash.
+      try {
+        var t = localStorage.getItem("ognom-theme");
+        var d = localStorage.getItem("ognom-density");
+        if (t) document.documentElement.setAttribute("data-theme", t);
+        if (d) document.documentElement.setAttribute("data-density", d);
+      } catch (e) {}
+    </script>
   </head>
 
   <body>

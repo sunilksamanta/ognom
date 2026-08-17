@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -10,8 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { api, errMsg } from "@/lib/api";
 
 interface DuplicateCollectionDialogProps {
@@ -51,7 +50,7 @@ export function DuplicateCollectionDialog({
     try {
       const { documents, indexes } = await api.duplicateCollection(database, source, trimmed);
       toast.success(
-        `Duplicated to "${trimmed}" — ${documents} document${documents === 1 ? "" : "s"}` +
+        `Duplicated to "${trimmed}" - ${documents} document${documents === 1 ? "" : "s"}` +
           (indexes > 0 ? `, ${indexes} index${indexes === 1 ? "" : "es"}` : "")
       );
       onDuplicated(trimmed);
@@ -65,44 +64,42 @@ export function DuplicateCollectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-[420px]">
+      <DialogContent className="max-w-[480px]">
         <DialogHeader>
           <DialogTitle>Duplicate collection</DialogTitle>
-          <DialogDescription asChild>
-            <div>
-              Copy all documents and indexes of{" "}
-              <span className="font-mono font-medium text-foreground">{source}</span> into a new
-              collection.
-            </div>
+          <DialogDescription>
+            {database}.{source}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
-          <Label htmlFor={nameId} className="text-xs font-normal text-muted-foreground">
-            New collection name
-          </Label>
-          <Input
-            id={nameId}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void submit()}
-            disabled={busy}
-            autoComplete="off"
-            spellCheck={false}
-            autoFocus
-            className="h-8 font-mono"
-          />
-          {trimmed === source && (
-            <p className="text-xs text-destructive">Pick a name different from the source.</p>
-          )}
-        </div>
+        <DialogBody>
+          <p className="text-[12.5px] leading-relaxed text-text-2">
+            Copy all documents and indexes of <span className="mono text-text">{source}</span> into a new
+            collection.
+          </p>
+          <div className="fld">
+            <label htmlFor={nameId}>New collection name</label>
+            <input
+              id={nameId}
+              className={trimmed === source ? "in dgr" : "in"}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void submit()}
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+            />
+            {trimmed === source && <span className="hint text-danger">Pick a name different from the source.</span>}
+          </div>
+        </DialogBody>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button size="sm" disabled={!canDuplicate} onClick={() => void submit()}>
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          <Button disabled={!canDuplicate} onClick={() => void submit()}>
+            {busy && <Loader2 className="spin h-4 w-4 text-text-3" />}
             Duplicate
           </Button>
         </DialogFooter>

@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
-import { Activity, Loader2, OctagonX, RefreshCw } from "lucide-react";
+import { Loader2, OctagonX, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -31,8 +30,17 @@ const asNum = (v: unknown): number | null => (typeof v === "number" ? v : null);
 const get = (d: Doc | undefined | null, key: string): unknown =>
   d && typeof d === "object" ? (d as Record<string, unknown>)[key] : undefined;
 
+/** Centered placeholder inside a .tw scroller (loading / empty). */
+function Placeholder({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full min-h-[200px] items-center justify-center gap-2 px-6 py-12 text-center text-[12.5px] text-text-3">
+      {children}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Operations tab — currentOp with kill
+// Operations tab - currentOp with kill
 // ---------------------------------------------------------------------------
 
 function OperationsTab({ active }: { active: boolean }) {
@@ -56,67 +64,68 @@ function OperationsTab({ active }: { active: boolean }) {
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex h-[380px] flex-col">
-      <div className="flex items-center justify-between pb-2">
-        <p className="text-xs text-muted-foreground">
-          {ops === null ? "…" : `${ops.length} active operation${ops.length === 1 ? "" : "s"}`}
-        </p>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void load()}>
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+    <div className="flex h-[400px] flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="mono text-[11px] text-text-3">
+          {ops === null ? "..." : `${ops.length} active operation${ops.length === 1 ? "" : "s"}`}
+        </span>
+        <Button variant="outline" size="xs" onClick={() => void load()}>
+          {loading ? <Loader2 className="spin h-4 w-4 text-text-3" /> : <RefreshCw />}
           Refresh
         </Button>
       </div>
-      <ScrollArea className="flex-1 rounded-md border">
+      <div className="tw rounded-[var(--r-sm)] border border-line bg-panel">
         {ops === null || ops.length === 0 ? (
-          <p className="flex h-full items-center justify-center py-16 text-xs text-muted-foreground">
-            {ops === null ? "Loading…" : "No active operations right now."}
-          </p>
+          <Placeholder>
+            {ops === null && <Loader2 className="spin h-4 w-4 text-text-3" />}
+            {ops === null ? "Loading..." : "No active operations right now."}
+          </Placeholder>
         ) : (
-          <div className="divide-y">
-            {ops.map((op, i) => {
-              const opid = get(op, "opid");
-              const secs = asNum(get(op, "secs_running"));
-              return (
-                <div key={i} className="flex items-start gap-2 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-mono font-medium">{String(get(op, "op") ?? "?")}</span>
-                      <span className="truncate font-mono text-muted-foreground">
-                        {String(get(op, "ns") ?? "")}
-                      </span>
-                      {secs !== null && (
-                        <span
-                          className={
-                            secs >= 5
-                              ? "rounded bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning"
-                              : "text-[10px] text-muted-foreground"
-                          }
-                        >
-                          {secs}s
-                        </span>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>op</th>
+                <th>ns</th>
+                <th>
+                  running<span className="ty">s</span>
+                </th>
+                <th>command</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {ops.map((op, i) => {
+                const opid = get(op, "opid");
+                const secs = asNum(get(op, "secs_running"));
+                return (
+                  <tr key={i}>
+                    <td className="text-text">{String(get(op, "op") ?? "?")}</td>
+                    <td className="max-w-[200px] truncate">{String(get(op, "ns") ?? "")}</td>
+                    <td>
+                      {secs !== null ? (
+                        <span className={secs >= 5 ? "pill warn" : "pill"}>{secs}s</span>
+                      ) : (
+                        <span className="text-text-3">-</span>
                       )}
-                    </p>
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                    </td>
+                    <td className="max-w-[300px] truncate text-text-3">
                       {JSON.stringify(get(op, "command") ?? {}).slice(0, 160)}
-                    </p>
-                  </div>
-                  {opid !== undefined && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive"
-                      onClick={() => setKilling(opid)}
-                    >
-                      <OctagonX className="h-3 w-3" />
-                      Kill
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    </td>
+                    <td className="text-right">
+                      {opid !== undefined && (
+                        <button type="button" className="btn dgr sm" onClick={() => setKilling(opid)}>
+                          <OctagonX />
+                          Kill
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
-      </ScrollArea>
+      </div>
 
       <ConfirmDialog
         open={killing !== null}
@@ -191,96 +200,102 @@ function ProfilerTab({ active }: { active: boolean }) {
   };
 
   return (
-    <div className="flex h-[380px] flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <Select value={db} onValueChange={setDb}>
-          <SelectTrigger className="h-7 w-44 font-mono text-xs">
-            <SelectValue placeholder="Database" />
-          </SelectTrigger>
-          <SelectContent>
-            {databases.map((d) => (
-              <SelectItem key={d.name} value={d.name} className="font-mono text-xs">
-                {d.name}
-              </SelectItem>
+    <div className="flex h-[400px] flex-col gap-3">
+      <div className="flex items-end gap-3">
+        <div className="fld w-[200px]">
+          <label>Database</label>
+          <Select value={db} onValueChange={setDb}>
+            <SelectTrigger className="h-[34px] font-mono text-xs">
+              <SelectValue placeholder="Database" />
+            </SelectTrigger>
+            <SelectContent>
+              {databases.map((d) => (
+                <SelectItem key={d.name} value={d.name} className="font-mono text-xs">
+                  {d.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="fld">
+          <label>Profiling level</label>
+          <div className="seg">
+            {[
+              { v: 0, label: "Off" },
+              { v: 1, label: `Slow ops${slowMs != null ? ` (>${slowMs}ms)` : ""}` },
+              { v: 2, label: "All ops" },
+            ].map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                className={level === o.v ? "on" : undefined}
+                onClick={() => void changeLevel(o.v)}
+              >
+                {o.label}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
-        <div className="flex items-center rounded-md border bg-muted/60 p-0.5">
-          {[
-            { v: 0, label: "Off" },
-            { v: 1, label: `Slow ops${slowMs != null ? ` (>${slowMs}ms)` : ""}` },
-            { v: 2, label: "All ops" },
-          ].map((o) => (
-            <button
-              key={o.v}
-              onClick={() => void changeLevel(o.v)}
-              className={
-                level === o.v
-                  ? "rounded-[5px] bg-background px-2 py-0.5 text-[11px] font-medium shadow-sm"
-                  : "rounded-[5px] px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-              }
-            >
-              {o.label}
-            </button>
-          ))}
+          </div>
         </div>
         <div className="flex-1" />
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void load(db)}>
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+        <Button variant="outline" size="sm" onClick={() => void load(db)}>
+          {loading ? <Loader2 className="spin h-4 w-4 text-text-3" /> : <RefreshCw />}
           Refresh
         </Button>
       </div>
 
-      <ScrollArea className="flex-1 rounded-md border">
+      <div className="tw rounded-[var(--r-sm)] border border-line bg-panel">
         {!entries || entries.length === 0 ? (
-          <p className="flex h-full items-center justify-center px-6 py-16 text-center text-xs text-muted-foreground">
+          <Placeholder>
+            {entries === null && <Loader2 className="spin h-4 w-4 text-text-3" />}
             {entries === null
-              ? "Loading…"
-              : "No profiler entries. Turn the profiler on (Slow ops) and run some queries — they'll show up here."}
-          </p>
+              ? "Loading..."
+              : "No profiler entries. Turn the profiler on (Slow ops) and run some queries - they'll show up here."}
+          </Placeholder>
         ) : (
-          <div className="divide-y">
-            {entries.map((e, i) => {
-              const millis = asNum(get(e, "millis"));
-              return (
-                <div key={i} className="px-3 py-2">
-                  <p className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-mono font-medium">{String(get(e, "op") ?? "?")}</span>
-                    <span className="truncate font-mono text-muted-foreground">
-                      {String(get(e, "ns") ?? "")}
-                    </span>
-                    {millis !== null && (
-                      <span
-                        className={
-                          millis >= 100
-                            ? "rounded bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning"
-                            : "text-[10px] text-muted-foreground"
-                        }
-                      >
-                        {millis}ms
-                      </span>
-                    )}
-                    {String(get(e, "planSummary") ?? "").includes("COLLSCAN") && (
-                      <span className="rounded bg-destructive/15 px-1.5 py-px text-[10px] font-medium text-destructive">
-                        COLLSCAN
-                      </span>
-                    )}
-                  </p>
-                  <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                    {JSON.stringify(get(e, "command") ?? get(e, "query") ?? {}).slice(0, 160)}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>op</th>
+                <th>ns</th>
+                <th>
+                  time<span className="ty">ms</span>
+                </th>
+                <th>plan</th>
+                <th>command</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => {
+                const millis = asNum(get(e, "millis"));
+                const collscan = String(get(e, "planSummary") ?? "").includes("COLLSCAN");
+                return (
+                  <tr key={i}>
+                    <td className="text-text">{String(get(e, "op") ?? "?")}</td>
+                    <td className="max-w-[200px] truncate">{String(get(e, "ns") ?? "")}</td>
+                    <td>
+                      {millis !== null ? (
+                        <span className={millis >= 100 ? "pill warn" : "pill"}>{millis}ms</span>
+                      ) : (
+                        <span className="text-text-3">-</span>
+                      )}
+                    </td>
+                    <td>{collscan ? <span className="pill dgr">COLLSCAN</span> : <span className="text-text-3">-</span>}</td>
+                    <td className="max-w-[300px] truncate text-text-3">
+                      {JSON.stringify(get(e, "command") ?? get(e, "query") ?? {}).slice(0, 160)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Live stats tab — 2s polling while visible
+// Live stats tab - 2s polling while visible
 // ---------------------------------------------------------------------------
 
 function LiveTab({ active }: { active: boolean }) {
@@ -299,7 +314,7 @@ function LiveTab({ active }: { active: boolean }) {
           return s;
         });
       } catch {
-        // server unreachable — keep last numbers
+        // server unreachable - keep last numbers
       }
     };
     void tick();
@@ -315,7 +330,7 @@ function LiveTab({ active }: { active: boolean }) {
   const rate = (key: string): string => {
     const now = asNum(get(opc(status), key));
     const before = asNum(get(opc(prev), key));
-    if (now === null || before === null) return "—";
+    if (now === null || before === null) return "-";
     return `${Math.max(0, Math.round((now - before) / 2)).toLocaleString()}/s`;
   };
 
@@ -330,32 +345,32 @@ function LiveTab({ active }: { active: boolean }) {
     ["Deletes", rate("delete")],
     ["Commands", rate("command")],
     ["Getmores", rate("getmore")],
-    ["Connections", asNum(get(conn, "current"))?.toLocaleString() ?? "—"],
-    ["Available conns", asNum(get(conn, "available"))?.toLocaleString() ?? "—"],
-    ["Resident mem", asNum(get(mem, "resident")) !== null ? `${asNum(get(mem, "resident"))} MB` : "—"],
-    ["Virtual mem", asNum(get(mem, "virtual")) !== null ? `${asNum(get(mem, "virtual"))} MB` : "—"],
+    ["Connections", asNum(get(conn, "current"))?.toLocaleString() ?? "-"],
+    ["Available conns", asNum(get(conn, "available"))?.toLocaleString() ?? "-"],
+    ["Resident mem", asNum(get(mem, "resident")) !== null ? `${asNum(get(mem, "resident"))} MB` : "-"],
+    ["Virtual mem", asNum(get(mem, "virtual")) !== null ? `${asNum(get(mem, "virtual"))} MB` : "-"],
     [
       "Uptime",
       uptime !== null
         ? uptime > 86400
           ? `${Math.floor(uptime / 86400)}d ${Math.floor((uptime % 86400) / 3600)}h`
           : `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`
-        : "—",
+        : "-",
     ],
-    ["Server", String(get(status, "version") ?? "—")],
+    ["Server", String(get(status, "version") ?? "-")],
   ];
 
   return (
-    <div className="h-[380px]">
-      <p className="pb-2 text-xs text-muted-foreground">
-        Live server metrics — refreshed every 2 seconds while this tab is open. Op rates are
+    <div className="flex h-[400px] flex-col gap-3">
+      <p className="hint">
+        Live server metrics - refreshed every 2 seconds while this tab is open. Op rates are
         per-second deltas.
       </p>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+      <div className="statgrid">
         {cards.map(([label, value]) => (
-          <div key={label} className="rounded-md border bg-muted/40 px-2.5 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-            <p className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</p>
+          <div key={label}>
+            <div className="l">{label}</div>
+            <div className="v mono truncate tabular-nums">{value}</div>
           </div>
         ))}
       </div>
@@ -368,41 +383,36 @@ function LiveTab({ active }: { active: boolean }) {
 export function OpsDialog({ open, onOpenChange }: OpsDialogProps) {
   const [tab, setTab] = useState("operations");
 
+  const tabs: [string, string][] = [
+    ["operations", "Operations"],
+    ["profiler", "Profiler"],
+    ["live", "Live stats"],
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[680px]">
-        <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Server operations
-          </DialogTitle>
-          <DialogDescription>
-            Live operations, the query profiler, and real-time server metrics.
-          </DialogDescription>
+      <DialogContent className="max-w-[820px]">
+        <DialogHeader>
+          <DialogTitle>Server operations</DialogTitle>
+          <DialogDescription>live operations · query profiler · real-time server metrics</DialogDescription>
         </DialogHeader>
-
-        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col px-5 pb-5">
-          <TabsList className="mt-3 h-8 w-fit">
-            <TabsTrigger value="operations" className="h-7 px-3 text-xs">
-              Operations
-            </TabsTrigger>
-            <TabsTrigger value="profiler" className="h-7 px-3 text-xs">
-              Profiler
-            </TabsTrigger>
-            <TabsTrigger value="live" className="h-7 px-3 text-xs">
-              Live stats
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="operations" className="mt-3">
-            <OperationsTab active={open && tab === "operations"} />
-          </TabsContent>
-          <TabsContent value="profiler" className="mt-3">
-            <ProfilerTab active={open && tab === "profiler"} />
-          </TabsContent>
-          <TabsContent value="live" className="mt-3">
-            <LiveTab active={open && tab === "live"} />
-          </TabsContent>
-        </Tabs>
+        <DialogBody>
+          <div className="seg self-start">
+            {tabs.map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                className={tab === v ? "on" : undefined}
+                onClick={() => setTab(v)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === "operations" && <OperationsTab active={open && tab === "operations"} />}
+          {tab === "profiler" && <ProfilerTab active={open && tab === "profiler"} />}
+          {tab === "live" && <LiveTab active={open && tab === "live"} />}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

@@ -1,23 +1,15 @@
-import { toast } from "sonner";
 import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
-  BarChart3,
   ChevronDown,
   ChevronRight,
-  Copy,
   Info,
   ListEnd,
   Loader2,
-  Gauge,
-  Play,
   Plus,
-  SquareTerminal,
   Trash2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -28,14 +20,11 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CodeEditor } from "@/components/CodeEditor";
-import { ResultsViewer } from "@/components/explorer/ResultsViewer";
-import { ViewToggle } from "@/components/explorer/DocumentsPane";
-import { DocumentDialogs, type DocDialogState } from "@/components/explorer/DocumentDialogs";
-import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
-import { newStage, useExplorer, type Stage, type Tab } from "@/stores/explorer";
-import { useSettings } from "@/stores/settings";
-import { useMemo, useState } from "react";
-import { api, errMsg, type Doc, type StageStat } from "@/lib/api";
+import { ResultsViewer, docSelectionKey } from "@/components/explorer/ResultsViewer";
+import { ViewToggle } from "@/components/explorer/ViewToggle";
+import { newStage, pipelineSig, useExplorer, type Stage, type Tab } from "@/stores/explorer";
+import { useMemo } from "react";
+import { type Doc, type StageStat } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STAGE_OPS = [
@@ -94,13 +83,11 @@ function StageStatBadge({ stat, prevDocs }: { stat: StageStat; prevDocs: number 
       ? Math.round(((prevDocs - stat.docs) / prevDocs) * 100)
       : null;
   return (
-    <div className="mx-2 mb-1.5 flex items-center gap-2 rounded bg-muted/50 px-2 py-1 text-[10px] tabular-nums text-muted-foreground">
-      <span className="font-medium text-foreground">{stat.docs.toLocaleString()}</span>
+    <div className="mx-2 mb-1.5 flex items-center gap-2 rounded-[var(--r-xs)] bg-panel-2 px-2 py-1 font-mono text-[10px] tabular-nums text-text-3">
+      <span className="text-text">{stat.docs.toLocaleString()}</span>
       docs out
       {drop !== null && drop > 0 && (
-        <span className={cn("rounded px-1 py-px font-medium", drop >= 90 ? "bg-info/15 text-info" : "bg-muted text-muted-foreground")}>
-          −{drop}%
-        </span>
+        <span className={cn("pill", drop >= 90 ? "acc" : "")}>-{drop}%</span>
       )}
       <span className="ml-auto">{stageMs.toLocaleString()} ms cumulative</span>
     </div>
@@ -139,22 +126,19 @@ function StageCard({
   return (
     <div
       className={cn(
-        "rounded-lg border bg-card transition-opacity",
+        "rounded-[var(--r)] border border-line bg-panel transition-opacity",
         !stage.enabled && "opacity-50"
       )}
     >
       <div className="flex items-center gap-1 px-2 py-1.5">
         <button
           onClick={() => update({ collapsed: !stage.collapsed })}
-          className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="ico sm"
+          aria-label={stage.collapsed ? "Expand stage" : "Collapse stage"}
         >
-          {stage.collapsed ? (
-            <ChevronRight className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronDown className="h-3.5 w-3.5" />
-          )}
+          {stage.collapsed ? <ChevronRight /> : <ChevronDown />}
         </button>
-        <span className="w-4 text-center text-[11px] tabular-nums text-muted-foreground">
+        <span className="w-4 text-center font-mono text-[11px] tabular-nums text-text-3">
           {index + 1}
         </span>
         <Select
@@ -163,7 +147,7 @@ function StageCard({
             update({ op, body: stage.body.trim() === "" || stage.body === SNIPPETS[stage.op] || stage.body === "{\n  \n}" ? SNIPPETS[op] ?? "{\n  \n}" : stage.body })
           }
         >
-          <SelectTrigger className="h-7 w-[150px] font-mono text-xs">
+          <SelectTrigger className="h-7 w-[150px] text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="max-h-72">
@@ -179,42 +163,30 @@ function StageCard({
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => void runAggregate(tab.id, index)}
-            >
-              <ListEnd className="h-3.5 w-3.5" />
-            </Button>
+            <button className="ico sm" onClick={() => void runAggregate(tab.id, index)} aria-label="Run to here">
+              <ListEnd />
+            </button>
           </TooltipTrigger>
           <TooltipContent>Run pipeline up to this stage</TooltipContent>
         </Tooltip>
-        <Button variant="ghost" size="icon" className="h-6 w-6" disabled={index === 0} onClick={() => move(-1)}>
-          <ArrowUp className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          disabled={index === total - 1}
-          onClick={() => move(1)}
-        >
-          <ArrowDown className="h-3.5 w-3.5" />
-        </Button>
+        <button className="ico sm" disabled={index === 0} onClick={() => move(-1)} aria-label="Move up">
+          <ArrowUp />
+        </button>
+        <button className="ico sm" disabled={index === total - 1} onClick={() => move(1)} aria-label="Move down">
+          <ArrowDown />
+        </button>
         <Switch
           checked={stage.enabled}
           onCheckedChange={(enabled) => update({ enabled })}
           className="mx-1 scale-90"
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 text-muted-foreground hover:text-destructive"
+        <button
+          className="ico sm dgr"
           onClick={() => patchAgg(tab.id, { stages: stages.filter((s) => s.id !== stage.id) })}
+          aria-label="Remove stage"
         >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
+          <Trash2 />
+        </button>
       </div>
       {!stage.collapsed && (
         <div className="px-2 pb-2">
@@ -235,48 +207,12 @@ function StageCard({
 
 export function AggregatePane({ tab }: { tab: Tab }) {
   const patchAgg = useExplorer((s) => s.patchAgg);
-  const runAggregate = useExplorer((s) => s.runAggregate);
-  const setTabMode = useExplorer((s) => s.setTabMode);
-  const patchShell = useExplorer((s) => s.patchShell);
-  const setAdvancedMode = useSettings((s) => s.setAdvancedMode);
-  const [dialog, setDialog] = useState<DocDialogState>({ type: "closed" });
-  const [explain, setExplain] = useState<ExplainRequest | null>(null);
-  const [explainOpen, setExplainOpen] = useState(false);
+  const setDrawer = useExplorer((s) => s.setDrawer);
   const a = tab.agg;
 
-  // ── Stage profiling: per-stage doc counts + timing ──────────────────────
-  // Stats are keyed to a signature of the enabled stages so edits after a
-  // run hide stale numbers instead of mislabeling them.
-  const [stats, setStats] = useState<{ sig: string; rows: StageStat[] } | null>(null);
-  const [profiling, setProfiling] = useState(false);
-
-  const pipelineSig = (stages: Stage[]) =>
-    JSON.stringify(stages.filter((s) => s.enabled).map((s) => [s.op, s.body]));
-
-  const runStageStats = async () => {
-    const enabled = a.stages.filter((s) => s.enabled);
-    if (enabled.length === 0) {
-      toast.error("Add at least one enabled stage");
-      return;
-    }
-    setProfiling(true);
-    try {
-      const rows = await api.aggregateStageStats(
-        tab.database,
-        tab.collection,
-        enabled.map((s) => ({ op: s.op, body: s.body })),
-        a.allowDiskUse
-      );
-      setStats({ sig: pipelineSig(a.stages), rows });
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setProfiling(false);
-    }
-  };
-
-  // Map enabled-stage order → stage id, valid only while the signature holds.
+  // Map enabled-stage order to stage id, valid only while the signature holds.
   const statByStageId = useMemo(() => {
+    const stats = a.stats;
     if (!stats || stats.sig !== pipelineSig(a.stages)) return {};
     const map: Record<string, { stat: StageStat; prevDocs: number | null }> = {};
     let i = 0;
@@ -289,85 +225,32 @@ export function AggregatePane({ tab }: { tab: Tab }) {
       prev = row.docs;
     }
     return map;
-  }, [stats, a.stages]);
+  }, [a.stats, a.stages]);
 
   // Stable so the memoized ResultsViewer doesn't rebuild on stage-body edits.
   const docActions = useMemo(
-    () => ({ onView: (doc: Doc) => setDialog({ type: "view", doc }) }),
-    []
+    () => ({ onView: (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "agg" }) }),
+    [setDrawer, tab.id]
   );
-
-  const openExplain = () => {
-    const stages = a.stages
-      .filter((s) => s.enabled)
-      .map((s) => ({ op: s.op, body: s.body }));
-    if (stages.length === 0) {
-      toast.error("Add at least one enabled stage");
-      return;
-    }
-    setExplain({
-      database: tab.database,
-      collection: tab.collection,
-      filter: "",
-      sort: "",
-      projection: "",
-      pipelineStages: stages,
-    });
-    setExplainOpen(true);
-  };
-
-  const pipelineText = () => {
-    const parts = a.stages
-      .filter((s) => s.enabled)
-      .map((s) => {
-        const body = s.body.trim().split("\n").join("\n  ");
-        return `  { ${s.op}: ${body} }`;
-      });
-    return `[\n${parts.join(",\n")}\n]`;
-  };
-
-  const copyPipeline = async () => {
-    await navigator.clipboard.writeText(pipelineText());
-    toast.success("Pipeline copied");
-  };
-
-  const openInShell = () => {
-    setAdvancedMode(true);
-    const coll = /^[A-Za-z_]\w*$/.test(tab.collection)
-      ? tab.collection
-      : `getCollection("${tab.collection}")`;
-    patchShell(tab.id, { text: `db.${coll}.aggregate(${pipelineText()})` });
-    setTabMode(tab.id, "shell");
-  };
+  const activeKey = tab.drawer.kind === "doc" && tab.drawer.source === "agg" ? docSelectionKey(tab.drawer.doc) : null;
 
   return (
     <div className="flex min-h-0 flex-1">
       {/* stages column */}
-      <div className="flex w-[400px] shrink-0 flex-col border-r">
-        <div className="no-select flex shrink-0 items-center gap-2 border-b px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Pipeline
-          </span>
-          <span className="text-xs text-muted-foreground/70">
+      <div className="flex w-[400px] shrink-0 flex-col border-r border-line">
+        <div className="no-select flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+          <span className="lbl">Pipeline</span>
+          <span className="font-mono text-[10.5px] text-text-3">
             {a.stages.filter((s) => s.enabled).length} active
           </span>
           <div className="flex-1" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => void copyPipeline()}>
-                <Copy className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy pipeline as shell syntax</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openInShell}>
-                <SquareTerminal className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open in shell</TooltipContent>
-          </Tooltip>
+          <button
+            className="btn qt sm"
+            onClick={() => patchAgg(tab.id, { stages: [...a.stages, newStage("$match", SNIPPETS.$match)] })}
+          >
+            <Plus />
+            Add stage
+          </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -383,103 +266,55 @@ export function AggregatePane({ tab }: { tab: Tab }) {
                 prevDocs={statByStageId[stage.id]?.prevDocs ?? null}
               />
             ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-dashed text-muted-foreground"
-              onClick={() =>
-                patchAgg(tab.id, { stages: [...a.stages, newStage("$match", SNIPPETS.$match)] })
-              }
+            <button
+              className="btn"
+              style={{ borderStyle: "dashed", justifyContent: "center", color: "var(--text-3)" }}
+              onClick={() => patchAgg(tab.id, { stages: [...a.stages, newStage("$match", SNIPPETS.$match)] })}
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus />
               Add stage
-            </Button>
+            </button>
           </div>
-        </div>
-
-        <div className="no-select flex shrink-0 items-center gap-2 border-t px-3 py-2">
-          <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-            <Checkbox
-              checked={a.allowDiskUse}
-              onCheckedChange={(v) => patchAgg(tab.id, { allowDiskUse: v === true })}
-            />
-            Disk use
-          </label>
-          <div className="flex-1" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={profiling}
-                onClick={() => void runStageStats()}
-              >
-                {profiling ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <BarChart3 className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Stage stats — doc counts, drop-off %, and timing per stage</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openExplain}>
-                <Gauge className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Explain plan — index usage & timing</TooltipContent>
-          </Tooltip>
-          <Button size="sm" className="h-7 gap-1.5" disabled={a.loading} onClick={() => void runAggregate(tab.id)}>
-            {a.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-            Run pipeline
-          </Button>
         </div>
       </div>
 
       {/* results column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="no-select flex h-9 shrink-0 items-center gap-2 border-b px-3">
-          <span className="text-xs text-muted-foreground">
+        <div className="no-select flex h-9 shrink-0 items-center gap-2 border-b border-line px-3">
+          <span className="font-mono text-[11px] text-text-3">
             {a.docs === null
               ? "Results"
               : `${a.docs.length} result${a.docs.length === 1 ? "" : "s"}${a.execMs !== null ? ` · ${a.execMs}ms` : ""}`}
           </span>
-          {a.ranToStage !== null && (
-            <span className="rounded bg-info/15 px-1.5 py-0.5 text-[10px] font-medium text-info">
-              after stage {a.ranToStage + 1}
-            </span>
-          )}
+          {a.ranToStage !== null && <span className="pill acc">after stage {a.ranToStage + 1}</span>}
           <div className="flex-1" />
           <ViewToggle view={a.view} onChange={(view) => patchAgg(tab.id, { view })} />
         </div>
 
         {a.error && (
-          <div className="mx-3 mt-2 flex shrink-0 items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span className="break-all font-mono">{a.error}</span>
+          <div className="notice dgr mono mx-3 mt-2 shrink-0">
+            <AlertCircle />
+            <span className="min-w-0 break-all">{a.error}</span>
           </div>
         )}
         {a.appliedDefaultLimit && !a.error && (
-          <div className="mx-3 mt-2 flex shrink-0 items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-1.5 text-xs text-muted-foreground">
-            <Info className="h-3.5 w-3.5 shrink-0 text-info" />
-            Preview capped at 500 documents — add a $limit / $out stage to control output.
+          <div className="notice mx-3 mt-2 shrink-0">
+            <Info />
+            <span>Preview capped at 500 documents - add a $limit / $out stage to control output.</span>
           </div>
         )}
 
         {a.loading ? (
           <div className="flex flex-1 items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <Loader2 className="spin h-5 w-5 text-text-3" />
           </div>
         ) : a.docs === null ? (
-          <div className="no-select flex flex-1 items-center justify-center text-center text-muted-foreground">
+          <div className="no-select flex flex-1 items-center justify-center text-center">
             <div>
-              <p className="text-sm font-medium text-foreground">Build, then run</p>
-              <p className="mt-1 max-w-[280px] text-xs">
-                Compose stages on the left and hit Run pipeline — or run partway with the
-                stage-preview button.
+              <p className="text-[13px] font-medium text-text-2">Build, then run</p>
+              <p className="mt-1 max-w-[280px] text-[12px] text-text-3">
+                Compose stages on the left and press Run pipeline in the dock, or run partway with the
+                stage-preview button on a stage.
               </p>
             </div>
           </div>
@@ -489,19 +324,10 @@ export function AggregatePane({ tab }: { tab: Tab }) {
             view={a.view}
             actions={docActions}
             emptyText="Pipeline returned no documents"
+            activeKey={activeKey}
           />
         )}
       </div>
-
-      <DocumentDialogs
-        database={tab.database}
-        collection={tab.collection}
-        state={dialog}
-        onClose={() => setDialog({ type: "closed" })}
-        onMutated={() => void runAggregate(tab.id)}
-      />
-
-      <ExplainSheet request={explain} open={explainOpen} onOpenChange={setExplainOpen} />
     </div>
   );
 }

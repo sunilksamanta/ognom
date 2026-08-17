@@ -8,11 +8,14 @@ import {
   type Doc,
   type ShellOutcome,
   type StageInput,
+  type StageStat,
 } from "@/lib/api";
 import { useSettings } from "@/stores/settings";
 
 export type ViewMode = "json" | "table";
-export type TabMode = "documents" | "aggregate" | "shell";
+/** Canvas views. `documents`/`table` share the find query; the others are
+ *  panes of their own. */
+export type TabMode = "table" | "documents" | "schema" | "aggregate" | "indexes" | "shell";
 
 export interface DocsState {
   filter: string;
@@ -29,6 +32,8 @@ export interface DocsState {
   view: ViewMode;
   /** Bumped on every successful run so dialogs can refresh. */
   ranAt: number;
+  /** Winning plan of the last run ("IXSCAN name" / "COLLSCAN"), best-effort. */
+  plan: string | null;
 }
 
 export interface Stage {
@@ -50,7 +55,14 @@ export interface AggState {
   /** Stage index the preview ran to (null = full pipeline). */
   ranToStage: number | null;
   view: ViewMode;
+  /** Per-stage profile, keyed to a signature of the enabled stages so edits
+   *  after a run hide stale numbers instead of mislabeling them. */
+  stats: { sig: string; rows: StageStat[] } | null;
+  profiling: boolean;
 }
+
+export const pipelineSig = (stages: Stage[]) =>
+  JSON.stringify(stages.filter((s) => s.enabled).map((s) => [s.op, s.body]));
 
 export interface ShellState {
   text: string;
@@ -60,6 +72,12 @@ export interface ShellState {
   view: ViewMode;
 }
 
+/** What the right-hand drawer shows for a tab. */
+export type DrawerState =
+  | { kind: "closed" }
+  | { kind: "doc"; doc: Doc; source: "docs" | "agg" | "shell"; view?: "fields" | "json" }
+  | { kind: "insert"; template?: Doc };
+
 export interface Tab {
   id: string;
   database: string;
@@ -68,6 +86,7 @@ export interface Tab {
   docs: DocsState;
   agg: AggState;
   shell: ShellState;
+  drawer: DrawerState;
 }
 
 let nextId = 1;
@@ -94,8 +113,9 @@ const freshDocs = (limit: number): DocsState => ({
   execMs: null,
   count: null,
   countExact: false,
-  view: "json",
+  view: "table",
   ranAt: 0,
+  plan: null,
 });
 
 const freshAgg = (): AggState => ({
@@ -107,7 +127,9 @@ const freshAgg = (): AggState => ({
   execMs: null,
   appliedDefaultLimit: false,
   ranToStage: null,
-  view: "json",
+  view: "table",
+  stats: null,
+  profiling: false,
 });
 
 const freshShell = (collection: string): ShellState => ({
@@ -118,13 +140,14 @@ const freshShell = (collection: string): ShellState => ({
   view: "json",
 });
 
-/** The per-workspace slice of explorer state — cached when switching away from
+/** The per-workspace slice of explorer state - cached when switching away from
  *  a workspace and restored when switching back. */
 export interface ExplorerSnapshot {
   databases: DbInfo[];
   collections: Record<string, CollInfo[]>;
   expanded: Record<string, boolean>;
   sidebarFilter: string;
+  selectedDb: string | null;
   tabs: Tab[];
   activeTabId: string | null;
 }
@@ -135,9 +158,18 @@ interface ExplorerState {
   collections: Record<string, CollInfo[]>;
   expanded: Record<string, boolean>;
   sidebarFilter: string;
+  /** Database shown in the picker column. */
+  selectedDb: string | null;
+  /** Estimated document counts per "db.coll" for the picker. */
+  counts: Record<string, number>;
 
   tabs: Tab[];
   activeTabId: string | null;
+
+  selectDatabase: (name: string | null) => Promise<void>;
+  setDrawer: (id: string, drawer: DrawerState) => void;
+  /** Open (or focus) a collection and stay in the given view. */
+  openCollectionAs: (database: string, collection: string, mode: TabMode) => void;
 
   reset: () => void;
   /** Capture the current workspace's slice for caching. */
@@ -168,6 +200,7 @@ interface ExplorerState {
   runFind: (id: string, opts?: { resetPage?: boolean }) => Promise<void>;
   refreshActiveDocs: () => Promise<void>;
   runAggregate: (id: string, uptoStage?: number) => Promise<void>;
+  runStageStats: (id: string) => Promise<void>;
   runShell: (id: string) => Promise<void>;
 }
 
@@ -177,15 +210,18 @@ export const useExplorer = create<ExplorerState>((set, get) => {
 
   const tab = (id: string) => get().tabs.find((t) => t.id === id);
 
-  const makeTab = (database: string, collection: string): Tab => ({
+  const makeTab = (database: string, collection: string, mode: TabMode = "table"): Tab => ({
     id: newId("tab"),
     database,
     collection,
-    mode: "documents",
+    mode,
     docs: freshDocs(useSettings.getState().pageSize),
     agg: freshAgg(),
     shell: freshShell(collection),
+    drawer: { kind: "closed" },
   });
+
+  const LAST_DB_KEY = "ognom-last-db";
 
   return {
     databases: [],
@@ -193,6 +229,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     collections: {},
     expanded: {},
     sidebarFilter: "",
+    selectedDb: null,
+    counts: {},
     tabs: [],
     activeTabId: null,
 
@@ -203,6 +241,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         collections: {},
         expanded: {},
         sidebarFilter: "",
+        selectedDb: null,
+        counts: {},
         tabs: [],
         activeTabId: null,
       }),
@@ -214,6 +254,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         collections: s.collections,
         expanded: s.expanded,
         sidebarFilter: s.sidebarFilter,
+        selectedDb: s.selectedDb,
         tabs: s.tabs,
         activeTabId: s.activeTabId,
       };
@@ -230,6 +271,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         collections: snap.collections,
         expanded: snap.expanded,
         sidebarFilter: snap.sidebarFilter,
+        selectedDb: snap.selectedDb,
+        counts: {},
         tabs: snap.tabs,
         activeTabId: snap.activeTabId,
       });
@@ -238,12 +281,64 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     loadDatabases: async () => {
       set({ loadingDbs: true });
       try {
-        set({ databases: await api.listDatabases() });
+        const databases = await api.listDatabases();
+        set({ databases });
+        // Keep a sensible database selected: the one already chosen, the last
+        // one used, the first non-system one, or the first at all.
+        const current = get().selectedDb;
+        if (!current || !databases.some((d) => d.name === current)) {
+          const last = localStorage.getItem(LAST_DB_KEY);
+          const pick =
+            databases.find((d) => d.name === last)?.name ??
+            databases.find((d) => !["admin", "local", "config"].includes(d.name))?.name ??
+            databases[0]?.name ??
+            null;
+          if (pick) await get().selectDatabase(pick);
+        }
       } catch (e) {
         toast.error(errMsg(e));
       } finally {
         set({ loadingDbs: false });
       }
+    },
+
+    selectDatabase: async (name) => {
+      set({ selectedDb: name });
+      if (!name) return;
+      localStorage.setItem(LAST_DB_KEY, name);
+      set((s) => ({ expanded: { ...s.expanded, [name]: true } }));
+      const colls = await get().loadCollections(name);
+      // Estimated counts for the picker, in the background and best-effort.
+      void (async () => {
+        for (const c of colls) {
+          if (get().selectedDb !== name) return;
+          if (c.kind === "view") continue;
+          try {
+            const st = await api.collectionStats(name, c.name);
+            if (st.count != null) {
+              set((s) => ({ counts: { ...s.counts, [`${name}.${c.name}`]: st.count! } }));
+            }
+          } catch {
+            // ignore - counts are decorative
+          }
+        }
+      })();
+    },
+
+    setDrawer: (id, drawer) => patchTab(id, (t) => ({ ...t, drawer })),
+
+    openCollectionAs: (database, collection, mode) => {
+      const existing = get().tabs.find(
+        (t) => t.database === database && t.collection === collection
+      );
+      if (existing) {
+        patchTab(existing.id, (t) => ({ ...t, mode }));
+        set({ activeTabId: existing.id });
+        return;
+      }
+      const tab = makeTab(database, collection, mode);
+      set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+      void get().runFind(tab.id);
     },
 
     loadCollections: async (db) => {
@@ -286,8 +381,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
       void get().runFind(tab.id);
     },
 
-    // Hand-off from Studio: open (or focus) a collection straight into Shell
-    // mode with the query pre-filled, ready to optimize.
+    // Open (or focus) a collection straight into Shell mode with the query
+    // pre-filled (used by "open pipeline in shell").
     openShellWithQuery: (database, collection, query) => {
       const existing = get().tabs.find(
         (t) => t.database === database && t.collection === collection
@@ -310,6 +405,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         docs: freshDocs(useSettings.getState().pageSize),
         agg: freshAgg(),
         shell: { ...freshShell(collection), text: query },
+        drawer: { kind: "closed" },
       };
       set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
     },
@@ -341,7 +437,10 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     refreshTabsForCollection: (database, collection) => {
       get()
         .tabs.filter(
-          (t) => t.database === database && t.collection === collection && t.mode === "documents"
+          (t) =>
+            t.database === database &&
+            t.collection === collection &&
+            (t.mode === "documents" || t.mode === "table")
         )
         .forEach((t) => void get().runFind(t.id));
     },
@@ -374,11 +473,26 @@ export const useExplorer = create<ExplorerState>((set, get) => {
           loading: false,
           ranAt: Date.now(),
         });
-        // Count in the background; don't block results.
+        // Count and plan in the background; don't block results.
         void api
           .countDocuments(t.database, t.collection, docsState.filter)
           .then((c) => get().patchDocs(id, { count: c.count ?? null, countExact: c.exact }))
           .catch(() => get().patchDocs(id, { count: null }));
+        void api
+          .explainQuery({
+            database: t.database,
+            collection: t.collection,
+            filter: docsState.filter,
+            sort: docsState.sort,
+            projection: docsState.projection,
+            verbosity: "queryPlanner",
+          })
+          .then((x) =>
+            get().patchDocs(id, {
+              plan: x.isCollectionScan ? "COLLSCAN" : x.indexName ? `IXSCAN ${x.indexName}` : x.stages[0] ?? null,
+            })
+          )
+          .catch(() => get().patchDocs(id, { plan: null }));
       } catch (e) {
         get().patchDocs(id, { loading: false, error: errMsg(e) });
       }
@@ -412,6 +526,29 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         });
       } catch (e) {
         get().patchAgg(id, { loading: false, error: errMsg(e) });
+      }
+    },
+
+    runStageStats: async (id) => {
+      const t = tab(id);
+      if (!t) return;
+      const enabled = t.agg.stages.filter((s) => s.enabled);
+      if (enabled.length === 0) {
+        toast.error("Add at least one enabled stage");
+        return;
+      }
+      get().patchAgg(id, { profiling: true });
+      try {
+        const rows = await api.aggregateStageStats(
+          t.database,
+          t.collection,
+          enabled.map((s) => ({ op: s.op, body: s.body })),
+          t.agg.allowDiskUse
+        );
+        get().patchAgg(id, { stats: { sig: pipelineSig(t.agg.stages), rows }, profiling: false });
+      } catch (e) {
+        get().patchAgg(id, { profiling: false });
+        toast.error(errMsg(e));
       }
     },
 

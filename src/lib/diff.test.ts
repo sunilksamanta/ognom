@@ -53,13 +53,13 @@ describe("previewValue", () => {
   });
 
   it("renders missing values as an em dash", () => {
-    expect(previewValue(undefined)).toBe("—");
+    expect(previewValue(undefined)).toBe(" - ");
   });
 
   it("truncates long values", () => {
     const long = previewValue({ text: "x".repeat(200) });
     expect(long.length).toBeLessThanOrEqual(80);
-    expect(long.endsWith("…")).toBe(true);
+    expect(long.endsWith("...")).toBe(true);
   });
 
   it("renders numeric $date extJSON as ISO", () => {

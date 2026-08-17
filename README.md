@@ -5,9 +5,10 @@
 <h1 align="center">Ognom</h1>
 
 <p align="center">
-  <b>The free MongoDB client that speaks to everyone.</b><br/>
-  Engineers get a fast, precise workspace. Everyone else gets an AI studio that turns
-  plain English into queries, charts, and answers — in the same app.
+  <b>The free, no-nonsense MongoDB client.</b><br/>
+  A fast native console for people who query: table and document views, a typed document
+  drawer, an aggregation builder, indexes and schema, a real shell - and connections that
+  know when they are production.
 </p>
 
 <p align="center">
@@ -23,17 +24,13 @@
 ## 📑 Table of contents
 
 - [⚡ Why Ognom](#-why-ognom)
-- [🔀 Two modes, one app](#-two-modes-one-app)
+- [🖥️ The console](#️-the-console)
 - [✨ Features](#-features)
-  - [🖥️ Normal Mode — for people who write queries](#️-normal-mode--for-people-who-write-queries)
-  - [🤖 Ognom Studio — for people who want answers](#-ognom-studio--for-people-who-want-answers)
-  - [🧠 The Shell AI assistant](#-the-shell-ai-assistant)
+- [🛡️ Production, read-only and backups](#️-production-read-only-and-backups)
+- [🎨 Themes and density](#-themes-and-density)
 - [📦 Installation](#-installation)
-  - [🍎 macOS](#-macos)
-  - [🪟 Windows](#-windows)
-  - [🐧 Linux](#-linux)
 - [🚀 Getting started](#-getting-started)
-- [🤖 AI setup and cost](#-ai-setup-and-cost)
+- [⌨️ Shortcuts](#️-shortcuts)
 - [🔐 Security model](#-security-model)
 - [🔌 Connect to anything](#-connect-to-anything)
 - [🔧 Build from source](#-build-from-source)
@@ -44,99 +41,65 @@
 
 ## ⚡ Why Ognom
 
-Most database tools force a choice: **powerful but intimidating**, or **friendly but shallow**. Ognom refuses that trade-off.
-
-- 🆓 **Free & open source.** No license keys, no locked "premium" tabs, no account, no telemetry.
-- 🪶 **Native & lightweight.** Built with Tauri (Rust + your OS webview) — a tiny binary and a fraction of the memory an Electron app burns.
-- 🗂️ **Many connections at once.** Open several servers as live **workspaces** and switch between them in one click — each keeps its own open tabs and sidebar.
-- 🔐 **Secure by default.** Credentials are encrypted at rest with AES‑256‑GCM; one toggle moves the key into your OS keychain. Passwords are never sent back to the UI.
-- 👥 **For developers _and_ the people they work with.** Flip one switch in the header and the whole app changes shape to fit the task in front of you.
-- ❓ **Never stuck.** A built‑in **Help** page (the `?` in the header) has guided examples for both developers and product owners.
+- 🆓 **Free and open source.** No license keys, no locked "premium" tabs, no account, no telemetry.
+- 🪶 **Native and lightweight.** Built with Tauri (Rust + your OS webview) - a tiny binary and a fraction of the memory an Electron app burns.
+- 🗂️ **Many connections at once.** Every saved connection is a tile on the rail; open several as live workspaces and switch in one click - each keeps its own tabs, picker and query state.
+- 🛡️ **Knows what production is.** Mark a connection as production and it opens read-only. Writes are blocked at the API layer until you switch to edit mode from the status bar - and Ognom asks first.
+- 🔐 **Secure by default.** Credentials are encrypted at rest with AES-256-GCM; one toggle moves the key into your OS keychain. Passwords are never sent back to the UI.
+- 🎯 **No AI, no chat, no fluff.** Ognom 2.0 is a focused console for developers. Everything is a query, a table, a document or an index.
 
 ---
 
-## 🔀 Two modes, one app
+## 🖥️ The console
 
-> You don't pick a tool for your skill level — you flip a switch for the task in front of you.
+Ognom 2.0 is a single window built on the Ognom design system:
 
-<table>
-<tr>
-<td width="50%" valign="top">
+| Region | What lives there |
+|---|---|
+| **Titlebar** | The breadcrumb (`collection · db · connection · host`), find anything (⌘K), themes, settings. |
+| **Rail** | Connection tiles first (colour tag, live dot, dashed border = read-only, red border = production), then Data / Server / Operations / Help, and Appearance / Settings at the bottom. |
+| **Picker** | The database button, one search across collections, then **Open** tabs, **Pinned** collections, **Collections** with counts, and **Saved queries**. |
+| **Canvas** | Collection title and stat strip (data, avg doc, indexes, storage), the view row (**Table · Documents · Schema · Aggregate · Indexes · Shell**), the results, and the **dock**. |
+| **Dock** | Find and Aggregate share one transport. Matched count, timing and the winning plan sit above the input, so a query never hides its cost. Build, sort/projection, explain, save, run. |
+| **Drawer** | Click any row: **Fields** (inline editing that preserves BSON types), **JSON** (full editor in shell syntax) and **Diff** against the loaded document. Save with ⌘S. |
+| **Status bar** | Connection and replica set, the current page and timing, the **write-mode switch**, timezone and version. |
 
-### 🖥️ Normal Mode
-**For developers, DBAs & data engineers.**
-
-A fast, keyboard-driven workspace with everything you expect from a serious MongoDB client — plus an AI assistant in the shell.
-
-Browse · query · aggregate · edit · index · explain · optimize.
-
-</td>
-<td width="50%" valign="top">
-
-### 🤖 Terminator Mode — *Ognom Studio*
-**For product managers, analysts & founders.**
-
-Chat with your data in plain English. Studio writes the query, runs it, charts it, and explains it — across one collection or your whole database.
-
-Ask · join · chart · summarize · export.
-
-</td>
-</tr>
-</table>
-
-One app, as many connections as you need — the same safety guarantees underneath every workspace.
+Every empty pane is the same component: the outline mark as a watermark, a message, and the version block pinned to the bottom.
 
 ---
 
 ## ✨ Features
 
-### 🖥️ Normal Mode — for people who write queries
+- **Table and Documents views** with BSON-aware colouring, type hints in table headers, multi-select with bulk delete, click-to-inspect nested values.
+- **Query dock** with mongosh-flavoured filters (`ObjectId()`, `ISODate()`, `$regex`, unquoted keys), sort and projection, a visual query builder, explain plans with suggested indexes, saved queries per collection, and pagination.
+- **Aggregation builder** with stage snippets, enable/disable, reorder, run-to-stage previews, per-stage stats (docs out, drop-off, cumulative time), explain, copy as shell, open in shell.
+- **Schema analysis** (field coverage and types from a sample) and an **Indexes** pane (stats, usage counts, unused hints, a create form with templates: single, compound, text, geo, hashed, TTL).
+- **Shell (advanced)** for one statement at a time with real shell syntax, history and completions.
+- **Import and export** as JSON, NDJSON, CSV or BSON (mongodump-compatible), streamed with progress and cancel.
+- **Copy a collection to another workspace**, **diff two collections** and sync the differences, duplicate, clear, drop.
+- **Server details** and an **operations panel** (currentOp, profiler, live stats).
+- **Connections**: URI or fields, colour tags, session mode, keychain toggle, encrypted export/import.
 
-| | |
-|---|---|
-| **Workspaces** | Connect to many servers at once and switch between them from the header — one click, no reconnect. Each workspace keeps its own open tabs and sidebar, and the ones you had open **reconnect automatically** next launch. |
-| **Browse** | Databases & collections sidebar with sizes, a search filter, and a `⌘K` jump‑to‑collection palette. Toggle the sidebar with `⌘B`. Right‑click menus everywhere — refresh, copy, edit, delete. |
-| **Two views, done well** | Documents render as **JSON** (collapsible, type‑colored, ObjectId/date aware) or a **table** (typed cells, sticky `_id`). |
-| **Visual Query Builder** | Build filters as `field · operator · value` rows with **autocomplete from your latest 1,000 documents**, Match‑ALL / Match‑ANY logic, and a deep operator set (between, starts/ends with, regex, in/not‑in, type, exists…). Drop to raw JSON anytime. |
-| **Aggregate** | A stage‑by‑stage pipeline builder: enable/disable, reorder, run‑to‑stage previews, copy as shell, or eject into the shell. |
-| **Schema Analyzer** | Sample your data and instantly see every field, its types, fill‑rate %, and example values. |
-| **Explain Plans** | Index usage, docs‑vs‑keys examined, timing, and a plain‑language verdict (*"collection scan — add an index"*) for find **and** aggregate. |
-| **Guided Index Builder** | Templates (single, compound, text, geo, hashed, TTL), a visual key editor, and full options (unique, sparse, hidden, partial filters, collation) — no syntax to memorize. |
-| **Export & Import** | Push query results or whole collections to **JSON / CSV**; import JSON / NDJSON. |
-| **Move connections** | Export your saved connections to a file and import them on another machine — either **without passwords** (re‑enter on import) or a **passphrase‑encrypted backup** that carries credentials safely. Copy any connection's string (with or without the password) in two clicks. Deleting one asks you to type its name first. |
-| **Shell** *(advanced)* | A real query editor — `db.users.find({}).sort({ gpa: -1 }).limit(5)` — with highlighting, history, a **drag‑resizable editor**, and helpers like `ObjectId()`, `ISODate()`, `NumberLong()`. |
-| **Safety‑first** | Destructive actions require an explicit *"I know what I'm doing"* confirmation. |
+---
 
-### 🤖 Ognom Studio — for people who want answers
+## 🛡️ Production, read-only and backups
 
-Flip the **Terminator** switch in the header, pick a **database** and a **collection** (or **Whole database**), and just chat.
+- Each saved connection has a **session mode**: **Read & write**, **Read-only**, or **Production**.
+- Read-only and production connections open with writes blocked. The status bar shows `read-only` (or `production · read-only`); click it to switch to **edit mode** for the session. Production asks you to acknowledge first, and paints its tile and title dot red so you always know where you are.
+- The block is enforced in one place - the API layer - so no menu, shortcut, shell statement or `$out` stage can write to a read-only workspace.
+- **Destructive actions ask properly.** Drop and clear require typing the collection name and offer an export first (BSON dump / JSON backup). Deleting several documents offers a JSON backup of exactly those documents before it runs.
 
-| | |
-|---|---|
-| 💬 **A real conversation** | Ask in plain English, then follow up — *"now just the last 30 days"*, *"make it a pie chart"*. Studio keeps context across the thread. |
-| 📊 **Instant charts** | Numeric answers render as animated **bar / line / pie / donut** charts with hover tooltips — switch types in a click, export as **PNG**. |
-| 🔗 **Whole‑database joins** | Choose **Whole database** and Studio samples your collections, picks the right ones, and writes `$lookup` joins for you — *"orders per customer"*, *"revenue by product category"*. |
-| 🔍 **See the query** | Every answer has a **View query** panel with the exact generated mongosh statement and what it does. Curious users learn; engineers trust. |
-| 🕑 **Chat history** | Every conversation is saved. Reopen one from the **History** rail (or the welcome screen) and it restores the database, collection, and full transcript. |
-| 💡 **Suggestions & summaries** | **Suggest questions** proposes smart, collection‑aware prompts; **Summarize** gives a plain‑language readout of any result set. |
-| 🪙 **Token usage** | Each answer, each chat, and the whole conversation show how many tokens were used (hover for the input/output split). When you switch topics, Studio nudges you to start a fresh chat to keep costs down. |
-| 🛡️ **Read‑only, always** | Ask Studio to insert, update, or delete and it politely refuses with a friendly note — Studio explores and visualizes, it never changes your data. |
-| 📤 **Export** | Charts as **PNG**, results as **JSON / CSV**. |
-| ➡️ **Hand off to the Shell** | On any answer, **Optimize in Shell** sends the generated query into Normal mode's developer shell to refine. |
+---
 
-### 🧠 The Shell AI assistant
+## 🎨 Themes and density
 
-The developer shell isn't just an editor — it has a built‑in AI co‑pilot:
-
-- 🩹 **Fix with AI** — when a query errors, one click sends the statement **and the error** for an instant fix.
-- ⚙️ **Optimize · Explain · Suggest indexes · Add safety limits** — one‑click actions, schema‑aware from your sampled fields.
-- ✅ **Apply & run** — accept the AI's improved query and re‑run instantly.
+Nine themes from the theme kit - **Mongo dark** (default), **Mongo light**, **Bloom**, **Bloom noir**, **Midnight**, **Mono**, **Contrast**, **Solar**, and **Follow OS** - and three densities (compact / comfortable / roomy). ⌘⇧T cycles themes. A theme is one CSS block of the same 30 tokens; components never see a literal colour, so a new theme cannot break a component.
 
 ---
 
 ## 📦 Installation
 
-Grab the build for your OS from the **[latest release ⬇️](https://github.com/sunilksamanta/ognom/releases/latest)**. Installed apps **update themselves** from GitHub releases (signature‑verified) — so you only do this once.
+Grab the build for your OS from the **[latest release ⬇️](https://github.com/sunilksamanta/ognom/releases/latest)**. Installed apps **update themselves** from GitHub releases (signature‑verified) - so you only do this once.
 
 | Platform | File |
 |---|---|
@@ -147,31 +110,31 @@ Grab the build for your OS from the **[latest release ⬇️](https://github.com
 
 ### 🍎 macOS
 
-**1. Pick the right build.** Apple menu → **About This Mac**. If it says **Apple M1/M2/M3/M4…** (Apple Silicon), download the **`aarch64`** `.dmg`; if it says **Intel**, download the **`x64`** `.dmg`. *(Picked the wrong one? The Intel build also runs on Apple Silicon via Rosetta, but the native `aarch64` build is faster — prefer it.)*
+**1. Pick the right build.** Apple menu → **About This Mac**. If it says **Apple M1/M2/M3/M4...** (Apple Silicon), download the **`aarch64`** `.dmg`; if it says **Intel**, download the **`x64`** `.dmg`. *(Picked the wrong one? The Intel build also runs on Apple Silicon via Rosetta, but the native `aarch64` build is faster - prefer it.)*
 
 **2. Install.** Open the `.dmg` and drag **Ognom** into your **Applications** folder.
 
-**3. First launch — clear Gatekeeper (one command).** Ognom is open source and distributed outside the App Store, so macOS quarantines it on download. The one step that works on **every Mac** — and is **required on Apple Silicon** — is to remove that quarantine flag. Open **Terminal** and run:
+**3. First launch - clear Gatekeeper (one command).** Ognom is open source and distributed outside the App Store, so macOS quarantines it on download. The one step that works on **every Mac** - and is **required on Apple Silicon** - is to remove that quarantine flag. Open **Terminal** and run:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Ognom.app
 ```
 
-Then double‑click **Ognom** in Applications. That's it — you only do this once. ✅
+Then double‑click **Ognom** in Applications. That's it - you only do this once. ✅
 
 <details>
 <summary><b>Why is this needed? (and why right‑click → Open isn't enough on Apple Silicon)</b></summary>
 
-macOS adds a `com.apple.quarantine` flag to anything you download. Because Ognom isn't signed with a paid Apple Developer certificate, Gatekeeper blocks the quarantined app — but the message differs by chip:
+macOS adds a `com.apple.quarantine` flag to anything you download. Because Ognom isn't signed with a paid Apple Developer certificate, Gatekeeper blocks the quarantined app - but the message differs by chip:
 
-- **Apple Silicon (M‑series):** macOS shows *"Ognom is damaged and can't be opened."* There is **no** right‑click → Open or "Open Anyway" escape for the *damaged* verdict — Apple Silicon strictly enforces code signatures, so the quarantine flag **must** be removed with the command above.
+- **Apple Silicon (M‑series):** macOS shows *"Ognom is damaged and can't be opened."* There is **no** right‑click → Open or "Open Anyway" escape for the *damaged* verdict - Apple Silicon strictly enforces code signatures, so the quarantine flag **must** be removed with the command above.
 - **Intel:** macOS shows the gentler *"unidentified developer"* warning, which right‑click → Open *can* bypass.
 
-The `xattr` command simply strips the download flag so macOS treats the app like one you built yourself. Notarized apps from a paid Developer account skip all of this — Ognom is free and open source, and the code is right here for you to read or build yourself.
+The `xattr` command simply strips the download flag so macOS treats the app like one you built yourself. Notarized apps from a paid Developer account skip all of this - Ognom is free and open source, and the code is right here for you to read or build yourself.
 </details>
 
 <details>
-<summary><b>Intel Mac alternative — right‑click → Open (no Terminal)</b></summary>
+<summary><b>Intel Mac alternative - right‑click → Open (no Terminal)</b></summary>
 
 On an **Intel** Mac you can skip the command:
 
@@ -179,18 +142,18 @@ On an **Intel** Mac you can skip the command:
 2. **Right‑click** (or Control‑click) **Ognom** → **Open**.
 3. Click **Open** in the dialog. macOS remembers your choice.
 
-If you instead see a *"damaged"* message (typical on Apple Silicon), use the `xattr` command above — right‑click → Open won't clear it.
+If you instead see a *"damaged"* message (typical on Apple Silicon), use the `xattr` command above - right‑click → Open won't clear it.
 </details>
 
 ### 🪟 Windows
 
-1. Download **`Ognom_x.y.z_x64-setup.exe`** (NSIS installer) — or the **`.msi`** if your org prefers MSI.
+1. Download **`Ognom_x.y.z_x64-setup.exe`** (NSIS installer) - or the **`.msi`** if your org prefers MSI.
 2. Run it. Because the app isn't code‑signed with a paid certificate, **SmartScreen** may show *"Windows protected your PC."* Click **More info → Run anyway**.
 3. Follow the installer. Launch **Ognom** from the Start menu. Updates install automatically going forward.
 
 ### 🐧 Linux
 
-Pick the package that matches your distro. You may need GTK/WebKit runtime libraries (`libwebkit2gtk-4.1`, `libgtk-3`) — most desktops already have them.
+Pick the package that matches your distro. You may need GTK/WebKit runtime libraries (`libwebkit2gtk-4.1`, `libgtk-3`) - most desktops already have them.
 
 <details>
 <summary><b>AppImage (works almost everywhere)</b></summary>
@@ -225,40 +188,45 @@ sudo dnf install ./Ognom-x.y.z-1.x86_64.rpm
 
 ## 🚀 Getting started
 
-1. **Connect.** Click the connection name (top‑left) → **New connection**. Paste a connection string, or fill in host/auth/TLS under *Advanced*. Connect to more servers any time and switch between them from the same menu.
-2. **Explore (Normal mode).** Click a collection in the sidebar, or press `⌘K` to jump by name. Browse, build queries, aggregate.
-3. **Ask (Terminator mode).** Flip the header switch to **Terminator**, pick a database + collection (or **Whole database**), and type a question.
-4. **Add your AI key.** Studio and the Shell assistant need an OpenAI key — see below.
-5. **Stuck?** Hit the **`?`** in the header for the in‑app Help page with examples for both audiences.
+1. Click **+** on the rail (or press ⌘K and pick *New connection*). Paste a URI or fill in host and credentials, give it a name and a colour tag, choose the session mode, **Test**, then **Connect**.
+2. Pick a database in the picker and click a collection. It opens in the **Table** view with the query dock underneath.
+3. Type a filter in the dock (`{ status: "paid", total: { $gt: 100 } }`) and press ⌘⏎. Sort and project with **Sort**, inspect the plan with **Explain**, keep it with **Save**.
+4. Click a row to open it in the drawer. Edit a value inline (types are preserved), or switch to **JSON**. **Diff** shows exactly what will change. ⌘S saves.
+5. Right-click a collection in the picker for pin, duplicate, copy to another workspace, diff, clear or drop.
 
 ---
 
-## 🤖 AI setup and cost
+## ⌨️ Shortcuts
 
-Studio and the Shell AI assistant use OpenAI. Set it up in **Settings → Prompts & AI** (or the key button in the Studio header).
-
-- 🔑 **Bring your own key.** Stored **locally** on your machine and sent only to `api.openai.com` from Ognom's backend — never through the web layer.
-- 🧩 **One editable model.** Defaults to `gpt-5.4-nano`; change it to any model you prefer.
-- ⚡🧠 **Normal vs Deep Think.** A single toggle controls reasoning on that same model — **Normal** stays fast, **Deep Think** reasons harder for tricky multi‑collection joins and ambiguous questions.
-- 🪙 **Transparent usage.** Token counts are shown per answer, per chat, and per conversation (hover for input/output). A fresh chat doesn't re‑send the previous conversation, so it costs fewer tokens — Studio suggests one when you change topics.
-- 🛡️ **Always safe.** AI‑generated queries run through Ognom's safe layer: results capped at **500** documents, an automatic `$limit` on aggregations, the generated query always visible, and **never any writes from a prompt**.
+| Keys | Action |
+|---|---|
+| ⌘K | Find anything: collections, databases, connections, actions |
+| ⌘O | Open a collection |
+| ⌘N | Insert a document (opens the drawer) |
+| ⌘⏎ | Run the query or pipeline |
+| ⌘S | Save the document in the drawer |
+| ⌘W | Close the active tab |
+| ⌘B | Toggle the picker |
+| ⌘, | Settings |
+| ⌘⇧T | Cycle themes |
+| Esc | Close overlays |
 
 ---
 
 ## 🔐 Security model
 
-- Connection profiles live in your OS app‑data directory as JSON; **secrets are AES‑256‑GCM encrypted**.
-- The 256‑bit master key is generated on first run and stored in a private (`0600`) key file by default — no permission prompts, ever. Flip **"Guard the encryption key with the OS keychain"** to move it into the **macOS Keychain / Windows Credential Manager / Secret Service** (saved connections keep working). If the keychain becomes unreachable, Ognom falls back to the key file and **tells you so in the UI** — no silent downgrades.
+- Connection profiles live in your OS app-data directory as JSON; **secrets are AES-256-GCM encrypted**.
+- The 256-bit master key is generated on first run and stored in a private (`0600`) key file by default - no permission prompts, ever. Flip **"Encryption key in the OS keychain"** (Settings > Safety) to move it into the **macOS Keychain / Windows Credential Manager / Secret Service** (saved connections keep working). If the keychain becomes unreachable, Ognom falls back to the key file and **tells you so in the status bar** - no silent downgrades.
 - The UI never receives stored secrets back; editing a connection keeps the stored password unless you type a new one.
-- **Exports are honest about secrets.** A *no‑passwords* export is plain, portable metadata — safe to share. A *full backup* re‑encrypts credentials under a **passphrase you choose** (Argon2id → AES‑256‑GCM); the master key never leaves your machine, so a naive copy of the on‑disk file can't be decrypted elsewhere.
-- The webview runs with a strict Content‑Security‑Policy and no remote content — Monaco and every asset are bundled locally, so the core app works fully offline.
-- Your queries go to **your** MongoDB server. Studio's AI prompts go only to **your** configured AI provider (OpenAI) using **your** key.
+- **Exports are honest about secrets.** A *no-passwords* export is plain, portable metadata - safe to share. A *full backup* re-encrypts credentials under a **passphrase you choose** (Argon2id then AES-256-GCM); the master key never leaves your machine, so a naive copy of the on-disk file cannot be decrypted elsewhere.
+- The webview runs with a strict Content-Security-Policy and no remote content - fonts, Monaco and every asset are bundled locally, so the app works fully offline.
+- Your queries go to **your** MongoDB server and nowhere else. There is no AI, no telemetry, no account.
 
 ---
 
 ## 🔌 Connect to anything
 
-Standard & `mongodb+srv`, replica sets, all SCRAM mechanisms, X.509, LDAP, TLS with custom CA / client certificates, read preferences, timeouts — all under *Advanced*. Or just paste a connection string.
+Standard and `mongodb+srv`, replica sets, all SCRAM mechanisms, X.509, LDAP, TLS with custom CA / client certificates, read preferences, timeouts - all under *Advanced options*. Or just paste a connection string.
 
 ---
 
@@ -278,14 +246,19 @@ npm run tauri build    # produce a bundle for your OS
 
 ## 📚 Docs and more
 
-- **Shell syntax** → [MONGODB_SHELL_SYNTAX.md](MONGODB_SHELL_SYNTAX.md) — everything the embedded shell understands.
-- **Releasing** → [RELEASING.md](RELEASING.md) — how builds are signed and shipped.
-- **In‑app Help** → the `?` button in the header, with examples for developers and product owners.
+- **Design system** - the theme kit and component layer this UI is built on live in the sibling `ognom-design-system` folder; `src/styles/` holds the in-repo copies.
+- **Shell syntax** - [MONGODB_SHELL_SYNTAX.md](MONGODB_SHELL_SYNTAX.md), everything the embedded shell understands.
+- **Releasing** - [RELEASING.md](RELEASING.md), how builds are signed and shipped.
+- **In-app Help** - the `?` on the rail.
+
+### Developing in a browser
+
+`npm run dev` outside the desktop shell installs an in-memory Tauri shim (`src/dev/mockTauri.ts`) with a fake server, so the whole UI can be exercised and screenshotted in a normal browser. It is never part of a production bundle.
 
 ---
 
 ## 📄 License
 
-[MIT](LICENSE) — free for everyone, forever.
+[MIT](LICENSE) - free for everyone, forever.
 
-<p align="center"><sub>Built with Rust 🦀, Tauri, and React. Made for the people who query — and the people who just need answers.</sub></p>
+<p align="center"><sub>Built with Rust 🦀, Tauri and React. Made for the people who query.</sub></p>

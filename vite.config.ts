@@ -20,7 +20,7 @@ export default defineConfig(async () => ({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Monaco is by far the largest dependency — keep it out of the app chunk.
+          // Monaco is by far the largest dependency - keep it out of the app chunk.
           monaco: ["monaco-editor"],
         },
       },

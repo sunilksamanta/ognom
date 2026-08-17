@@ -36,7 +36,7 @@ function Leaf({ value }: { value: unknown }) {
         "{shown}
         {long && !expanded && (
           <button
-            className="mx-1 rounded bg-muted px-1 text-[10px] text-muted-foreground hover:text-foreground"
+            className="pill mx-1"
             onClick={() => setExpanded(true)}
           >
             +{s.length - MAX_STRING} chars
@@ -86,7 +86,7 @@ function Node({ value, depth, comma, name }: NodeProps) {
     name !== undefined ? (
       <>
         <span className="text-bson-key">{name}</span>
-        <span className="text-muted-foreground">: </span>
+        <span className="text-bson-punc">: </span>
       </>
     ) : null;
 
@@ -95,7 +95,7 @@ function Node({ value, depth, comma, name }: NodeProps) {
       <div className="pl-4">
         {keyNode}
         <Leaf value={value} />
-        {comma && <span className="text-muted-foreground">,</span>}
+        {comma && <span className="text-bson-punc">,</span>}
       </div>
     );
   }
@@ -106,11 +106,11 @@ function Node({ value, depth, comma, name }: NodeProps) {
     return (
       <div className="pl-4">
         {keyNode}
-        <span className="text-muted-foreground">
+        <span className="text-bson-punc">
           {openCh}
           {closeCh}
         </span>
-        {comma && <span className="text-muted-foreground">,</span>}
+        {comma && <span className="text-bson-punc">,</span>}
       </div>
     );
   }
@@ -121,13 +121,13 @@ function Node({ value, depth, comma, name }: NodeProps) {
         {keyNode}
         <button
           onClick={() => setOpen(true)}
-          className="rounded bg-muted/70 px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="rounded-[4px] bg-panel-2 px-1.5 text-[11px] text-text-3 transition-colors hover:bg-hover hover:text-text"
           title="Expand"
         >
           {openCh} {entries.length} {kind === "array" ? (entries.length === 1 ? "item" : "items") : entries.length === 1 ? "field" : "fields"}{" "}
           {closeCh}
         </button>
-        {comma && <span className="text-muted-foreground">,</span>}
+        {comma && <span className="text-bson-punc">,</span>}
       </div>
     );
   }
@@ -142,9 +142,9 @@ function Node({ value, depth, comma, name }: NodeProps) {
         title="Collapse"
       >
         {keyNode}
-        <span className="text-muted-foreground">{openCh}</span>
+        <span className="text-bson-punc">{openCh}</span>
       </span>
-      <div className={cn(depth > 0 && "border-l border-border/50")}>
+      <div className={cn(depth > 0 && "border-l border-line")}>
         {entries.map(([k, v], i) => (
           <Node
             key={k}
@@ -155,8 +155,8 @@ function Node({ value, depth, comma, name }: NodeProps) {
           />
         ))}
       </div>
-      <span className="text-muted-foreground">{closeCh}</span>
-      {comma && <span className="text-muted-foreground">,</span>}
+      <span className="text-bson-punc">{closeCh}</span>
+      {comma && <span className="text-bson-punc">,</span>}
     </div>
   );
 }
