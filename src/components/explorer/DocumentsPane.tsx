@@ -201,8 +201,9 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
           text={
             d.filter.trim() ? (
               <>
-                <span className="mono">{d.filter.trim()}</span> returned 0
-                {d.count !== null ? ` of ${formatCount(d.count)}` : ""}.
+                Nothing in <span className="mono">{tab.collection}</span> matches{" "}
+                <span className="mono">{d.filter.trim()}</span>. Loosen the filter or check field names and
+                types.
               </>
             ) : readOnly ? (
               "Switch to edit mode to insert the first document."
