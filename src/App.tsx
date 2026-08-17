@@ -171,7 +171,6 @@ function App() {
         const target = e.target as HTMLElement | null;
         if (target?.closest(".monaco-editor")) return; // editors bind their own
         if (tab.mode === "aggregate") void ex.runAggregate(tab.id);
-        else if (tab.mode === "table" || tab.mode === "documents") void ex.runFind(tab.id, { resetPage: true });
       }
     };
     window.addEventListener("keydown", onKey);

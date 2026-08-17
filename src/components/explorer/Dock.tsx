@@ -318,15 +318,15 @@ export function Dock({ tab }: { tab: Tab }) {
         </div>
       ) : (
         <>
-          <div className="qline">
+          <div className="qline" style={{ alignItems: "flex-start" }}>
             <QueryInput
               value={d.filter}
               onChange={(v) => patchDocs(tab.id, { filter: v })}
-              onRun={() => run(true)}
               placeholder={`{ status: "paid", total: { $gt: 100 } }   -   ObjectId(), ISODate(), $regex all work`}
               fields={fields}
               ariaLabel="Filter"
               className="grow"
+              maxLines={12}
             />
             <Popover open={builderOpen} onOpenChange={setBuilderOpen}>
               <Tooltip>
@@ -466,32 +466,30 @@ export function Dock({ tab }: { tab: Tab }) {
             </DropdownMenu>
             <button className="btn pri" disabled={d.loading} onClick={() => run(true)}>
               {d.loading ? <Loader2 className="spin" /> : <Play />}
-              Run <span className="kbd">{RUN_KBD}</span>
+              Run
             </button>
           </div>
           {optionsOpen && (
-            <div className="qline">
-              <span className="lbl" style={{ flex: "none" }}>Sort</span>
+            <div className="qline" style={{ alignItems: "flex-start" }}>
+              <span className="lbl" style={{ flex: "none", paddingTop: 14 }}>Sort</span>
               <QueryInput
                 value={d.sort}
                 onChange={(v) => patchDocs(tab.id, { sort: v })}
-                onRun={() => run(true)}
                 placeholder="{ createdAt: -1 }"
                 fields={fields}
                 ariaLabel="Sort"
                 className="grow"
-                height={30}
+                maxLines={4}
               />
-              <span className="lbl" style={{ flex: "none" }}>Project</span>
+              <span className="lbl" style={{ flex: "none", paddingTop: 14 }}>Project</span>
               <QueryInput
                 value={d.projection}
                 onChange={(v) => patchDocs(tab.id, { projection: v })}
-                onRun={() => run(true)}
                 placeholder="{ name: 1, email: 1 }"
                 fields={fields}
                 ariaLabel="Projection"
                 className="grow"
-                height={30}
+                maxLines={4}
               />
               <button className="btn qt" onClick={openInShell}>
                 <Terminal />
