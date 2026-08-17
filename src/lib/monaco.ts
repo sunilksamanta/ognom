@@ -53,7 +53,7 @@ const CURSOR_METHODS = [
 
 const BSON_HELPERS = [
   "ObjectId", "ISODate", "Date", "UUID", "NumberLong", "NumberInt",
-  "NumberDecimal", "Timestamp", "BinData",
+  "NumberDecimal", "Timestamp", "BinData", "RegExp",
 ];
 
 const LITERALS = ["true", "false", "null"];
@@ -181,10 +181,13 @@ export function ensureMonaco(): void {
         // chained cursor methods: .sort( .limit( ...
         [/\.\s*[A-Za-z_$][\w$]*(?=\s*\()/, "function"],
         [
-          /\b(?:ObjectId|ISODate|NumberLong|NumberInt|NumberDecimal|Double|BinData|UUID|Timestamp|DBRef|MinKey|MaxKey|Date)\b(?=\s*\()/,
+          /\b(?:ObjectId|ISODate|NumberLong|NumberInt|NumberDecimal|Double|BinData|UUID|Timestamp|DBRef|MinKey|MaxKey|Date|RegExp)\b(?=\s*\()/,
           "constant.helper",
         ],
         [/\b(?:true|false|null|undefined)\b/, "keyword.literal"],
+        [/\bnew\b/, "keyword"],
+        // /pattern/flags after a colon, comma or opening bracket
+        [/\/(?:[^\/\\\n]|\\.)+\/[gimsuxy]*/, "regexp"],
         [/\b(?:show|use)\b/, "keyword"],
         [/\$[A-Za-z_]\w*/, "operator.mongo"],
         [/[A-Za-z_$][\w$]*(?=\s*:)/, "key"],
@@ -302,6 +305,7 @@ export function applyMonacoTheme(): void {
       { token: "keyword", foreground: strip(c.bool) },
       { token: "operator.mongo", foreground: strip(c.accent2) },
       { token: "comment", foreground: strip(c.text3), fontStyle: "italic" },
+      { token: "regexp", foreground: strip(c.str) },
       { token: "delimiter", foreground: strip(c.punc) },
       { token: "", foreground: strip(c.text) },
     ],

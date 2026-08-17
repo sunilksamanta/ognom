@@ -322,7 +322,7 @@ export function Dock({ tab }: { tab: Tab }) {
             <QueryInput
               value={d.filter}
               onChange={(v) => patchDocs(tab.id, { filter: v })}
-              placeholder={`{ status: "paid", total: { $gt: 100 } }   -   ObjectId(), ISODate(), $regex all work`}
+              placeholder={`{ status: "paid", total: { $gt: 100 } }   -   ObjectId(), ISODate(), new Date(), /regex/i, new RegExp() all work`}
               fields={fields}
               ariaLabel="Filter"
               className="grow"

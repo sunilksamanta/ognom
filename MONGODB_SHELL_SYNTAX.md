@@ -101,3 +101,11 @@ or this shell; *Copy as Extended JSON* produces strict JSON.
 - Multiple statements per run, variables, or arbitrary JavaScript
 - Regex literals (`/abc/i`) - use `{ $regex: "abc", $options: "i" }`
 - `findOneAndUpdate` family, bulk operations, transactions
+
+## Regular expressions and dates
+
+- `/pattern/flags` literals work anywhere a value is expected: `{ topic: /hello/i }`.
+- `new RegExp("pattern", "flags")` and `RegExp("pattern")` are accepted too, with JavaScript
+  string escaping (`"\\d+"`), and become `$regularExpression`.
+- `new Date("2024-01-15")`, `Date("...")`, `new Date(1700000000000)` and `ISODate(...)` all
+  produce a BSON date. Any helper may be prefixed with `new`.
