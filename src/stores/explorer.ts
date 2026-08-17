@@ -75,7 +75,7 @@ export interface ShellState {
 /** What the right-hand drawer shows for a tab. */
 export type DrawerState =
   | { kind: "closed" }
-  | { kind: "doc"; doc: Doc; source: "docs" | "agg" | "shell" }
+  | { kind: "doc"; doc: Doc; source: "docs" | "agg" | "shell"; view?: "fields" | "json" }
   | { kind: "insert"; template?: Doc };
 
 export interface Tab {

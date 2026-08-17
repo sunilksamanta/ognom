@@ -318,7 +318,7 @@ export function DocDrawer({ tab }: { tab: Tab }) {
     if (drawer.kind === "doc") {
       setDraft(structuredClone(drawer.doc));
       setText(toShellText(drawer.doc));
-      setSeg("fields");
+      setSeg(drawer.view ?? "fields");
     } else if (drawer.kind === "insert") {
       const base: Doc = drawer.template ? (({ _id: _drop, ...rest }) => rest)(drawer.template) : {};
       setDraft(base);

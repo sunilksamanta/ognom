@@ -48,14 +48,18 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
 
   // Stable identity so the memoized ResultsViewer doesn't re-render on every
   // keystroke in the dock.
+  // Table rows open the drawer on Fields; document cards open it on JSON.
+  const initialView = view === "json" ? "json" : "fields";
   const actions = useMemo(
     () => ({
-      onView: (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs" }),
-      onEdit: readOnly ? undefined : (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs" }),
+      onView: (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs", view: initialView }),
+      onEdit: readOnly
+        ? undefined
+        : (doc: Doc) => setDrawer(tab.id, { kind: "doc", doc, source: "docs", view: initialView }),
       onDuplicate: readOnly ? undefined : (doc: Doc) => setDrawer(tab.id, { kind: "insert", template: doc }),
       onDelete: readOnly ? undefined : (doc: Doc) => setConfirmOne(doc),
     }),
-    [tab.id, setDrawer, readOnly]
+    [tab.id, setDrawer, readOnly, initialView]
   );
 
   const selectedDoc = tab.drawer.kind === "doc" ? tab.drawer.doc : null;
