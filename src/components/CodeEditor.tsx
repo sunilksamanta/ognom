@@ -1,6 +1,6 @@
 import Editor, { OnMount } from "@monaco-editor/react";
 import { KeyCode, KeyMod } from "monaco-editor";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { applyMonacoTheme, ensureMonaco, MONO_FONT } from "@/lib/monaco";
 import { useTheme } from "@/components/theme-provider";
@@ -57,6 +57,23 @@ export function CodeEditor({
   // double-disposes and blanks the app.
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
+  // "100%" height: Monaco needs a pixel height to lay out, so measure the
+  // wrapper and feed the number in (the drawer JSON view fills its pane).
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [fillPx, setFillPx] = useState<number | null>(null);
+  useEffect(() => {
+    if (height !== "100%" || !boxRef.current) return;
+    const el = boxRef.current;
+    const update = () => setFillPx(el.clientHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [height]);
+  useEffect(() => {
+    if (fillPx !== null) editorRef.current?.layout();
+  }, [fillPx]);
+
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor;
     editor.addCommand(KeyMod.CtrlCmd | KeyCode.Enter, () => runRef.current?.());
@@ -72,14 +89,16 @@ export function CodeEditor({
 
   return (
     <div
+      ref={boxRef}
       className={cn(
         "overflow-hidden",
         !bare && "rounded-[var(--r-sm)] border border-line bg-panel-2 focus-within:border-accent-line",
         className
       )}
     >
+      {(height !== "100%" || fillPx !== null) && (
       <Editor
-        height={height}
+        height={height === "100%" ? fillPx! : height}
         path={path}
         language="mongodb"
         theme="ognom"
@@ -109,6 +128,7 @@ export function CodeEditor({
           fixedOverflowWidgets: true,
         }}
       />
+      )}
     </div>
   );
 }

@@ -565,9 +565,10 @@ export function DocDrawer({ tab }: { tab: Tab }) {
       )}
 
       {seg === "json" && (
-        <div className="min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
           <CodeEditor
             bare
+            className="h-full min-h-0 flex-1"
             value={text}
             readOnly={readOnly}
             onChange={(v) => {
