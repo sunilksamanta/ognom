@@ -1,11 +1,9 @@
 import { memo, useEffect, useState } from "react";
-import { ChevronDown, Download, Loader2, Plus, Upload } from "lucide-react";
+import { ArrowDownUp, ChevronDown, Download, Loader2, Plus, Upload } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -15,7 +13,6 @@ import { ShellPane } from "@/components/shell/ShellPane";
 import { IndexesPane } from "@/components/explorer/IndexesSheet";
 import { SchemaPane } from "@/components/explorer/SchemaSheet";
 import { Dock } from "@/components/explorer/Dock";
-import { DropCollectionDialog } from "@/components/explorer/CollectionDangerDialogs";
 import { useExplorer, type Tab, type TabMode } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useConnections } from "@/stores/connections";
@@ -46,7 +43,6 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
     (s) => s.workspaces.find((w) => w.info.id === s.activeId)?.readOnly ?? false
   );
   const [stats, setStats] = useState<CollectionStats | null>(null);
-  const [dropOpen, setDropOpen] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // Collection stats for the header - refreshed after every successful run
@@ -119,58 +115,69 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <button className="btn qt">
-                Export
+                <ArrowDownUp />
+                Import / Export
                 <ChevronDown style={{ width: 12, height: 12, opacity: 0.7 }} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>
-                Export {tab.docs.filter.trim() ? "current filter" : "all documents"}
-              </DropdownMenuLabel>
-              {(["json", "ndjson", "csv", "bson"] as const).map((format) => (
+            <DropdownMenuContent align="end" className="w-[300px] p-0">
+              <div className="border-b border-line px-3 py-2">
+                <div className="lbl">Export · {tab.docs.filter.trim() ? "current filter" : "all documents"}</div>
+                <div className="mt-0.5 font-mono text-[10.5px] text-text-3">
+                  {tab.docs.filter.trim() ? tab.docs.filter.trim().slice(0, 60) : `${tab.database}.${tab.collection}`}
+                </div>
+              </div>
+              <div className="p-1.5">
+                {(
+                  [
+                    ["json", "JSON", "one array, pretty printed"],
+                    ["ndjson", "NDJSON", "one document per line"],
+                    ["csv", "CSV", "flat columns for spreadsheets"],
+                    ["bson", "BSON", "mongodump-compatible archive"],
+                  ] as const
+                ).map(([format, label, hint]) => (
+                  <DropdownMenuItem
+                    key={format}
+                    className="gap-2.5 py-2"
+                    onClick={() =>
+                      void exportCollection({
+                        database: tab.database,
+                        collection: tab.collection,
+                        filter: tab.docs.filter,
+                        sort: tab.docs.sort,
+                        format,
+                      })
+                    }
+                  >
+                    <Download className="h-3.5 w-3.5 text-text-3" />
+                    <span className="w-14 font-mono text-[12px] text-text">{label}</span>
+                    <span className="text-[11px] text-text-3">{hint}</span>
+                  </DropdownMenuItem>
+                ))}
+              </div>
+              <div className="border-t border-line px-3 py-2">
+                <div className="lbl">Import into {tab.collection}</div>
+              </div>
+              <div className="p-1.5">
                 <DropdownMenuItem
-                  key={format}
-                  className="gap-2"
-                  onClick={() =>
-                    void exportCollection({
-                      database: tab.database,
-                      collection: tab.collection,
-                      filter: tab.docs.filter,
-                      sort: tab.docs.sort,
-                      format,
-                    })
-                  }
+                  className="gap-2.5 py-2"
+                  disabled={readOnly || importing}
+                  onClick={() => {
+                    setImporting(true);
+                    void importDocuments(tab.database, tab.collection)
+                      .then((ok) => {
+                        if (ok) void runFind(tab.id);
+                      })
+                      .finally(() => setImporting(false));
+                  }}
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  {format === "bson" ? "BSON (mongodump)" : format.toUpperCase()}
+                  {importing ? <Loader2 className="spin h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5 text-text-3" />}
+                  <span className="text-[12px] text-text">Choose a file</span>
+                  <span className="text-[11px] text-text-3">JSON · NDJSON · CSV · BSON</span>
                 </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="gap-2"
-                disabled={readOnly || importing}
-                onClick={() => {
-                  setImporting(true);
-                  void importDocuments(tab.database, tab.collection)
-                    .then((ok) => {
-                      if (ok) void runFind(tab.id);
-                    })
-                    .finally(() => setImporting(false));
-                }}
-              >
-                {importing ? <Loader2 className="spin h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5" />}
-                Import documents (JSON / CSV / BSON)
-              </DropdownMenuItem>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="btn dgr" disabled={readOnly} onClick={() => setDropOpen(true)}>
-                Drop
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{readOnly ? "Read-only workspace" : "Drop this collection"}</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -200,12 +207,6 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
 
       {(inFind || tab.mode === "aggregate" || tab.mode === "shell") && <Dock tab={tab} />}
 
-      <DropCollectionDialog
-        target={dropOpen ? { db: tab.database, coll: tab.collection } : null}
-        onOpenChange={(o) => {
-          if (!o) setDropOpen(false);
-        }}
-      />
     </div>
   );
 });
