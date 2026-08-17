@@ -304,14 +304,14 @@ textarea.in{height:auto;padding:10px 12px;line-height:1.5;resize:vertical}
 .idxrow .r{margin-left:auto;display:flex;align-items:center;gap:10px;font:450 10.5px/1 var(--mono);color:var(--text-3);flex:none}
 .idxrow.acc{border-color:var(--accent-line);background:var(--accent-soft)}
 .warnbox{display:flex;gap:11px;padding:13px 14px;border-radius:var(--r-sm);border:1px solid color-mix(in oklab,var(--danger) 35%,transparent);background:color-mix(in oklab,var(--danger) 10%,transparent);font:450 12.5px/1.55 var(--sans);color:var(--text-2)}
-.warnbox svg{width:17px;height:17px;color:var(--danger);flex:none;margin-top:1px}
+.warnbox>svg{width:17px;height:17px;color:var(--danger);flex:none;margin-top:1px}
 .warnbox b{color:var(--text);font-weight:600}
 .warnbox.soft{border-color:color-mix(in oklab,var(--warn) 40%,transparent);background:color-mix(in oklab,var(--warn) 10%,transparent)}
-.warnbox.soft svg{color:var(--warn)}
+.warnbox.soft>svg{color:var(--warn)}
 .warnbox.ok{border-color:color-mix(in oklab,var(--ok) 35%,transparent);background:color-mix(in oklab,var(--ok) 10%,transparent)}
-.warnbox.ok svg{color:var(--ok)}
+.warnbox.ok>svg{color:var(--ok)}
 .warnbox.info{border-color:var(--accent-line);background:var(--accent-soft)}
-.warnbox.info svg{color:var(--accent)}
+.warnbox.info>svg{color:var(--accent)}
 .warnbox.mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
 
 /* ---------- theme picker sheet ---------- */
@@ -333,13 +333,13 @@ textarea.in{height:auto;padding:10px 12px;line-height:1.5;resize:vertical}
 
 /* ---------- inline notice rows ---------- */
 .notice{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--panel);font:450 12px/1.5 var(--sans);color:var(--text-2)}
-.notice svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--text-3)}
+.notice>svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--text-3)}
 .notice.dgr{border-color:color-mix(in oklab,var(--danger) 40%,transparent);background:color-mix(in oklab,var(--danger) 10%,transparent);color:var(--danger)}
-.notice.dgr svg{color:var(--danger)}
+.notice.dgr>svg{color:var(--danger)}
 .notice.warn{border-color:color-mix(in oklab,var(--warn) 40%,transparent);background:color-mix(in oklab,var(--warn) 10%,transparent);color:var(--text-2)}
-.notice.warn svg{color:var(--warn)}
+.notice.warn>svg{color:var(--warn)}
 .notice.acc{border-color:var(--accent-line);background:var(--accent-soft);color:var(--text-2)}
-.notice.acc svg{color:var(--accent)}
+.notice.acc>svg{color:var(--accent)}
 .notice.mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
 
 /* ---------- section card in settings ---------- */
