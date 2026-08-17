@@ -286,6 +286,7 @@ textarea.in{height:auto;padding:10px 12px;line-height:1.5;resize:vertical}
 .opt.on{border-color:var(--accent-line);background:var(--accent-soft)}
 .opt.on.dgr{border-color:color-mix(in oklab,var(--danger) 55%,transparent);background:color-mix(in oklab,var(--danger) 10%,transparent)}
 .opt b{display:block;font:500 12.5px/1 var(--sans);margin-bottom:5px}
+.opt b svg{display:inline-block;width:14px;height:14px;vertical-align:-3px;margin-right:6px}
 .opt span{font:450 10.5px/1.4 var(--sans);color:var(--text-3)}
 .check{display:inline-flex;align-items:center;gap:9px;font:450 12.5px/1 var(--sans);color:var(--text-2);cursor:pointer;background:transparent;border:0;padding:0}
 .check i{width:15px;height:15px;border-radius:4px;border:1px solid var(--line-2);flex:none;display:grid;place-items:center;transition:.15s var(--ease)}

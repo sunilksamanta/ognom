@@ -449,8 +449,8 @@ function CreateForm({
         <div className="opts">
           {TEMPLATES.map((t) => (
             <button key={t.id} type="button" onClick={() => applyTemplate(t)} className="opt">
-              <b className="flex items-center gap-1.5">
-                <t.icon className="h-3.5 w-3.5 text-primary" />
+              <b>
+                <t.icon className="text-primary" />
                 {t.label}
               </b>
               <span>{t.desc}</span>
