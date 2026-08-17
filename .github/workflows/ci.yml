@@ -10,24 +10,24 @@ jobs:
     name: Typecheck & tests
     runs-on: ubuntu-latest
     steps:
- - uses: actions/checkout@v4
- - uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
- - run: npm ci
- - run: npm run typecheck
- - run: npm test
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
   backend:
     name: Rust check & tests
     # macOS runners build Tauri without extra system deps (webkit is bundled).
     runs-on: macos-latest
     steps:
- - uses: actions/checkout@v4
- - uses: dtolnay/rust-toolchain@stable
- - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
- - run: cargo check --manifest-path src-tauri/Cargo.toml
- - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
