@@ -27,7 +27,7 @@ const buttonVariants = cva(
         link: "border-transparent bg-transparent text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-[34px] px-3 text-[var(--fs-ui)]",
+        default: "h-[34px] px-3 text-[length:var(--fs-ui)]",
         sm: "h-[30px] px-[11px] text-[12px]",
         xs: "h-[26px] px-2 text-[11.5px] [&_svg]:size-3",
         lg: "h-10 px-4 text-[13px]",
