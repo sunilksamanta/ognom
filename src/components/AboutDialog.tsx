@@ -46,7 +46,7 @@ export function AboutDialog({ open, onOpenChange, onWhatsNew }: AboutDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[860px]" hideClose>
+      <DialogContent className="max-w-[860px]">
         <DialogTitle className="sr-only">About Ognom</DialogTitle>
         <DialogDescription className="sr-only">Version, licence and project links.</DialogDescription>
 
@@ -87,11 +87,6 @@ export function AboutDialog({ open, onOpenChange, onWhatsNew }: AboutDialogProps
 
           {/* spec sheet */}
           <div className="relative flex min-h-0 flex-col">
-            <button className="ico absolute right-3 top-3 z-10" onClick={() => onOpenChange(false)} aria-label="Close">
-              <svg viewBox="0 0 24 24" style={{ width: 16, height: 16 }}>
-                <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" />
-              </svg>
-            </button>
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto px-7 pb-6 pt-7">
               <div className="fld">
                 <label>Build</label>
