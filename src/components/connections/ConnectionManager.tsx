@@ -126,7 +126,12 @@ export function ConnectionManager() {
                   <DialogPrimitive.Title asChild>
                     <h3 className="hstack">
                       {view === "form" && profiles.length > 0 && (
-                        <button className="ico -ml-2" onClick={() => openConnections("list")} aria-label="Back">
+                        <button
+                          className="ico"
+                          style={{ marginLeft: -8, marginRight: 2 }}
+                          onClick={() => openConnections("list")}
+                          aria-label="Back"
+                        >
                           <ArrowLeft />
                         </button>
                       )}
