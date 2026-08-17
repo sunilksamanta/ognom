@@ -224,7 +224,7 @@ export function DocumentsPane({ tab }: { tab: Tab }) {
                 </button>
                 <button
                   className="btn qt"
-                  onClick={() => document.querySelector<HTMLInputElement>('.dock input[aria-label="Filter"]')?.focus()}
+                  onClick={() => document.querySelector<HTMLTextAreaElement>('.dock [aria-label="Filter"] textarea')?.focus()}
                 >
                   Edit filter
                 </button>

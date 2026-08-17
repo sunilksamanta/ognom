@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   Bookmark,
@@ -30,12 +30,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { QueryBuilder } from "@/components/explorer/QueryBuilder";
+import { QueryInput } from "@/components/explorer/QueryInput";
 import { ExplainSheet, type ExplainRequest } from "@/components/explorer/ExplainSheet";
 import { CheckRow } from "@/components/ui/check-row";
 import { BulkDeleteDialog, BulkUpdateDialog } from "@/components/explorer/BulkDialogs";
 import { useExplorer, type Tab } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useConnections } from "@/stores/connections";
+import { api } from "@/lib/api";
 import { formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 
@@ -65,11 +67,23 @@ export function Dock({ tab }: { tab: Tab }) {
   );
   const removeQuery = useSettings((s) => s.removeQuery);
 
+  // Sampled field paths of the collection feed the query completions.
+  const [fields, setFields] = useState<string[]>([]);
+  useEffect(() => {
+    let stale = false;
+    api
+      .collectionFields(tab.database, tab.collection, 1000)
+      .then((f) => !stale && setFields(f))
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [tab.database, tab.collection]);
+
   const [builderOpen, setBuilderOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [explain, setExplain] = useState<ExplainRequest | null>(null);
   const [explainOpen, setExplainOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [lastFindView, setLastFindView] = useState<"table" | "documents">("table");
 
   const isAgg = tab.mode === "aggregate";
@@ -305,34 +319,15 @@ export function Dock({ tab }: { tab: Tab }) {
       ) : (
         <>
           <div className="qline">
-            <div className="qin">
-              <Search style={{ width: 14, height: 14, flex: "none", color: "var(--text-3)", marginRight: 8 }} />
-              <input
-                ref={inputRef}
-                value={d.filter}
-                onChange={(e) => patchDocs(tab.id, { filter: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") run(true);
-                  if (e.key === "Escape") (e.target as HTMLInputElement).blur();
-                }}
-                placeholder={`{ status: "paid", total: { $gt: 100 } } -  ObjectId(), ISODate(), $regex all work`}
-                spellCheck={false}
-                autoComplete="off"
-                aria-label="Filter"
-              />
-              {d.filter && (
-                <button
-                  className="ico sm"
-                  onClick={() => {
-                    patchDocs(tab.id, { filter: "" });
-                    run(true);
-                  }}
-                  aria-label="Clear filter"
-                >
-                  <X />
-                </button>
-              )}
-            </div>
+            <QueryInput
+              value={d.filter}
+              onChange={(v) => patchDocs(tab.id, { filter: v })}
+              onRun={() => run(true)}
+              placeholder={`{ status: "paid", total: { $gt: 100 } }   -   ObjectId(), ISODate(), $regex all work`}
+              fields={fields}
+              ariaLabel="Filter"
+              className="grow"
+            />
             <Popover open={builderOpen} onOpenChange={setBuilderOpen}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -364,10 +359,10 @@ export function Dock({ tab }: { tab: Tab }) {
                   onClick={() => setOptionsOpen((o) => !o)}
                 >
                   <SlidersHorizontal />
-                  Sort
+                  Sort · Project
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Sort and projection</TooltipContent>
+              <TooltipContent>Sort order and projection for this query</TooltipContent>
             </Tooltip>
             <button className="btn qt" onClick={openExplain}>
               <Gauge />
@@ -476,30 +471,28 @@ export function Dock({ tab }: { tab: Tab }) {
           </div>
           {optionsOpen && (
             <div className="qline">
-              <div className="qin" style={{ height: 34 }}>
-                <span className="text-text-3" style={{ fontSize: 10.5, letterSpacing: ".1em" }}>SORT</span>
-                <input
-                  value={d.sort}
-                  onChange={(e) => patchDocs(tab.id, { sort: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && run(true)}
-                  placeholder="{ createdAt: -1 }"
-                  spellCheck={false}
-                  aria-label="Sort"
-                  style={{ marginLeft: 8 }}
-                />
-              </div>
-              <div className="qin" style={{ height: 34 }}>
-                <span className="text-text-3" style={{ fontSize: 10.5, letterSpacing: ".1em" }}>PROJECT</span>
-                <input
-                  value={d.projection}
-                  onChange={(e) => patchDocs(tab.id, { projection: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && run(true)}
-                  placeholder="{ name: 1, email: 1 }"
-                  spellCheck={false}
-                  aria-label="Projection"
-                  style={{ marginLeft: 8 }}
-                />
-              </div>
+              <span className="lbl" style={{ flex: "none" }}>Sort</span>
+              <QueryInput
+                value={d.sort}
+                onChange={(v) => patchDocs(tab.id, { sort: v })}
+                onRun={() => run(true)}
+                placeholder="{ createdAt: -1 }"
+                fields={fields}
+                ariaLabel="Sort"
+                className="grow"
+                height={30}
+              />
+              <span className="lbl" style={{ flex: "none" }}>Project</span>
+              <QueryInput
+                value={d.projection}
+                onChange={(v) => patchDocs(tab.id, { projection: v })}
+                onRun={() => run(true)}
+                placeholder="{ name: 1, email: 1 }"
+                fields={fields}
+                ariaLabel="Projection"
+                className="grow"
+                height={30}
+              />
               <button className="btn qt" onClick={openInShell}>
                 <Terminal />
                 Shell
