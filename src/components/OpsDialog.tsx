@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, OctagonX, RefreshCw } from "lucide-react";
+import { Loader2, OctagonX, RefreshCw, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -19,7 +19,8 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useExplorer } from "@/stores/explorer";
-import { api, errMsg, type Doc } from "@/lib/api";
+import { api, type Doc } from "@/lib/api";
+import { friendlyError, isUnauthorized } from "@/lib/errors";
 
 interface OpsDialogProps {
   open: boolean;
@@ -29,6 +30,49 @@ interface OpsDialogProps {
 const asNum = (v: unknown): number | null => (typeof v === "number" ? v : null);
 const get = (d: Doc | undefined | null, key: string): unknown =>
   d && typeof d === "object" ? (d as Record<string, unknown>)[key] : undefined;
+
+/**
+ * Inline "you can't see this" state for a tab: what the server refused, which
+ * privilege / role would unlock it, and the raw error for support tickets.
+ */
+function PermissionNotice({
+  what,
+  privilege,
+  roles,
+  error,
+  onRetry,
+}: {
+  what: string;
+  privilege: string;
+  roles: string;
+  error: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-[200px] items-center justify-center px-6 py-8">
+      <div className="warnbox soft max-w-[520px] flex-col gap-2">
+        <div className="hstack">
+          <ShieldOff />
+          <b>Your MongoDB user cannot view {what}</b>
+        </div>
+        <div className="text-text-2">
+          The server refused the request: <span className="mono">{error}</span>
+        </div>
+        <div className="text-text-2">
+          Ask your administrator for the <span className="mono">{privilege}</span> privilege - usually by granting the{" "}
+          <span className="mono">{roles}</span> role - or reconnect with a user that has it. Everything else in Ognom
+          keeps working; this only affects this view.
+        </div>
+        {onRetry && (
+          <button type="button" className="btn sm self-start" onClick={onRetry}>
+            <RefreshCw />
+            Try again
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** Centered placeholder inside a .tw scroller (loading / empty). */
 function Placeholder({ children }: { children: React.ReactNode }) {
@@ -46,14 +90,18 @@ function Placeholder({ children }: { children: React.ReactNode }) {
 function OperationsTab({ active }: { active: boolean }) {
   const [ops, setOps] = useState<Doc[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [denied, setDenied] = useState<string | null>(null);
   const [killing, setKilling] = useState<unknown | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setDenied(null);
     try {
       setOps(await api.currentOps());
     } catch (e) {
-      toast.error(errMsg(e));
+      setOps([]);
+      if (isUnauthorized(e)) setDenied(friendlyError(e));
+      else toast.error(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -67,7 +115,7 @@ function OperationsTab({ active }: { active: boolean }) {
     <div className="flex h-[400px] flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="mono text-[11px] text-text-3">
-          {ops === null ? "..." : `${ops.length} active operation${ops.length === 1 ? "" : "s"}`}
+          {denied ? "no access" : ops === null ? "..." : `${ops.length} active operation${ops.length === 1 ? "" : "s"}`}
         </span>
         <Button variant="outline" size="xs" onClick={() => void load()}>
           {loading ? <Loader2 className="spin h-4 w-4 text-text-3" /> : <RefreshCw />}
@@ -75,7 +123,15 @@ function OperationsTab({ active }: { active: boolean }) {
         </Button>
       </div>
       <div className="tw rounded-[var(--r-sm)] border border-line bg-panel">
-        {ops === null || ops.length === 0 ? (
+        {denied ? (
+          <PermissionNotice
+            what="running operations"
+            privilege="inprog (and killop to kill)"
+            roles="clusterMonitor / hostManager"
+            error={denied}
+            onRetry={() => void load()}
+          />
+        ) : ops === null || ops.length === 0 ? (
           <Placeholder>
             {ops === null && <Loader2 className="spin h-4 w-4 text-text-3" />}
             {ops === null ? "Loading..." : "No active operations right now."}
@@ -141,7 +197,11 @@ function OperationsTab({ active }: { active: boolean }) {
             setKilling(null);
             await load();
           } catch (e) {
-            toast.error(errMsg(e));
+            toast.error(
+              isUnauthorized(e)
+                ? "Your MongoDB user cannot kill operations - it needs the killop privilege (hostManager role)."
+                : friendlyError(e)
+            );
           }
         }}
       />
@@ -160,6 +220,7 @@ function ProfilerTab({ active }: { active: boolean }) {
   const [slowMs, setSlowMs] = useState<number | null>(null);
   const [entries, setEntries] = useState<Doc[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [denied, setDenied] = useState<string | null>(null);
 
   useEffect(() => {
     if (active && !db && databases.length > 0) setDb(databases[0].name);
@@ -168,6 +229,7 @@ function ProfilerTab({ active }: { active: boolean }) {
   const load = async (database: string) => {
     if (!database) return;
     setLoading(true);
+    setDenied(null);
     try {
       const [status, rows] = await Promise.all([
         api.profilerStatus(database),
@@ -177,7 +239,10 @@ function ProfilerTab({ active }: { active: boolean }) {
       setSlowMs(asNum(get(status, "slowms")));
       setEntries(rows);
     } catch (e) {
-      toast.error(errMsg(e));
+      setEntries([]);
+      setLevel(null);
+      if (isUnauthorized(e)) setDenied(friendlyError(e));
+      else toast.error(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -195,7 +260,11 @@ function ProfilerTab({ active }: { active: boolean }) {
       );
       await load(db);
     } catch (e) {
-      toast.error(errMsg(e));
+      toast.error(
+        isUnauthorized(e)
+          ? `Your MongoDB user cannot change the profiler on ${db} - it needs the enableProfiler privilege (dbAdmin role).`
+          : friendlyError(e)
+      );
     }
   };
 
@@ -244,7 +313,15 @@ function ProfilerTab({ active }: { active: boolean }) {
       </div>
 
       <div className="tw rounded-[var(--r-sm)] border border-line bg-panel">
-        {!entries || entries.length === 0 ? (
+        {denied ? (
+          <PermissionNotice
+            what={`the profiler on ${db}`}
+            privilege="enableProfiler and read on system.profile"
+            roles={`dbAdmin on ${db}`}
+            error={denied}
+            onRetry={() => void load(db)}
+          />
+        ) : !entries || entries.length === 0 ? (
           <Placeholder>
             {entries === null && <Loader2 className="spin h-4 w-4 text-text-3" />}
             {entries === null
@@ -301,29 +378,39 @@ function ProfilerTab({ active }: { active: boolean }) {
 function LiveTab({ active }: { active: boolean }) {
   const [status, setStatus] = useState<Doc | null>(null);
   const [prev, setPrev] = useState<Doc | null>(null);
+  const [denied, setDenied] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     if (!active) return;
     let stale = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
     const tick = async () => {
       try {
         const s = await api.serverStatusLight();
         if (stale) return;
+        setDenied(null);
         setStatus((cur) => {
           setPrev(cur);
           return s;
         });
-      } catch {
-        // server unreachable - keep last numbers
+      } catch (e) {
+        if (stale) return;
+        if (isUnauthorized(e)) {
+          // No point polling every 2s against a permission wall.
+          setDenied(friendlyError(e));
+          if (timer) clearInterval(timer);
+        }
+        // otherwise: server hiccup, keep the last numbers
       }
     };
     void tick();
-    const t = setInterval(() => void tick(), 2000);
+    timer = setInterval(() => void tick(), 2000);
     return () => {
       stale = true;
-      clearInterval(t);
+      if (timer) clearInterval(timer);
     };
-  }, [active]);
+  }, [active, retry]);
 
   const opc = (d: Doc | null) => (get(d, "opcounters") ?? {}) as Doc;
   // Per-second rates from the 2s polling delta.
@@ -366,6 +453,17 @@ function LiveTab({ active }: { active: boolean }) {
         Live server metrics - refreshed every 2 seconds while this tab is open. Op rates are
         per-second deltas.
       </p>
+      {denied ? (
+        <div className="tw rounded-[var(--r-sm)] border border-line bg-panel">
+          <PermissionNotice
+            what="live server metrics"
+            privilege="serverStatus"
+            roles="clusterMonitor"
+            error={denied}
+            onRetry={() => setRetry((n) => n + 1)}
+          />
+        </div>
+      ) : (
       <div className="statgrid">
         {cards.map(([label, value]) => (
           <div key={label}>
@@ -374,6 +472,7 @@ function LiveTab({ active }: { active: boolean }) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

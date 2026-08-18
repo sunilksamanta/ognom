@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useConnections } from "@/stores/connections";
+import { friendlyError, isUnauthorized } from "@/lib/errors";
 import { api, errMsg, type ServerInfoRaw } from "@/lib/api";
 import { formatBytes, formatCount, toPlainJson, toPlainValue } from "@/lib/bson";
 
@@ -152,7 +153,21 @@ export function ServerInfoDialog({ open, onOpenChange }: ServerInfoDialogProps) 
 
           {error && !loading && (
             <div className="flex flex-col items-center gap-3 py-8 text-center">
-              <div className="notice dgr mono max-w-md">{error}</div>
+              {isUnauthorized(error) ? (
+                <div className="warnbox soft max-w-md flex-col gap-2 text-left">
+                  <b>Your MongoDB user cannot read server details</b>
+                  <div className="text-text-2">
+                    The server refused the request: <span className="mono">{friendlyError(error)}</span>
+                  </div>
+                  <div className="text-text-2">
+                    buildInfo, hello, serverStatus and hostInfo need the <span className="mono">clusterMonitor</span> role
+                    (or the <span className="mono">serverStatus</span> / <span className="mono">hostInfo</span> privileges).
+                    Ask your administrator, or reconnect with a user that has them.
+                  </div>
+                </div>
+              ) : (
+                <div className="notice dgr mono max-w-md">{friendlyError(error)}</div>
+              )}
               <Button variant="outline" size="sm" onClick={load}>
                 <RefreshCw />
                 Retry
