@@ -310,7 +310,14 @@ export function DocDrawer({ tab }: { tab: Tab }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Reset when the drawer target changes.
-  const targetKey = drawer.kind === "doc" ? JSON.stringify(drawer.doc._id ?? drawer.doc) : drawer.kind === "insert" ? `insert:${JSON.stringify(drawer.template?._id ?? Math.random())}` : "closed";
+  // Must be stable across renders: it drives the reset effect and the Monaco
+  // model path. (A random key here re-created the editor on every render.)
+  const targetKey =
+    drawer.kind === "doc"
+      ? `doc:${JSON.stringify(drawer.doc._id ?? drawer.doc)}`
+      : drawer.kind === "insert"
+        ? `insert:${drawer.template ? JSON.stringify(drawer.template._id ?? drawer.template) : "blank"}`
+        : "closed";
   useEffect(() => {
     setError(null);
     setJsonDirty(false);
