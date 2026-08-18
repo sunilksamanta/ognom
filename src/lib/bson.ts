@@ -194,18 +194,23 @@ function shellLeaf(v: unknown): string | null {
   }
 }
 
+/**
+ * mongosh-style text. Short arrays and nested objects stay on one line; the
+ * root document is always expanded one field per line so editors read well.
+ */
 export function toShellText(v: unknown, indent = 0): string {
   const leaf = shellLeaf(v);
   if (leaf !== null) return leaf;
 
   const pad = "  ".repeat(indent);
   const padIn = "  ".repeat(indent + 1);
+  const root = indent === 0;
 
   if (Array.isArray(v)) {
     if (v.length === 0) return "[]";
     const items = v.map((item) => toShellText(item, indent + 1));
     const inline = `[${items.join(", ")}]`;
-    if (inline.length <= 72 && !inline.includes("\n")) return inline;
+    if (!root && inline.length <= 72 && !inline.includes("\n")) return inline;
     return `[\n${items.map((s) => padIn + s).join(",\n")}\n${pad}]`;
   }
 
@@ -214,7 +219,7 @@ export function toShellText(v: unknown, indent = 0): string {
   if (keys.length === 0) return "{}";
   const entries = keys.map((k) => `${shellKey(k)}: ${toShellText(o[k], indent + 1)}`);
   const inline = `{ ${entries.join(", ")} }`;
-  if (inline.length <= 72 && !inline.includes("\n")) return inline;
+  if (!root && inline.length <= 72 && !inline.includes("\n")) return inline;
   return `{\n${entries.map((s) => padIn + s).join(",\n")}\n${pad}}`;
 }
 
