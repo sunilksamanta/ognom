@@ -44,14 +44,18 @@ button{font-family:inherit;color:inherit}
 .rail{width:64px;flex:none;background:var(--chrome);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:10px 0 12px;gap:4px}
 .rail .mk{width:30px;height:30px;color:var(--accent);margin-bottom:10px;flex:none}
 .rail .mk svg{width:100%;height:100%}
-.conns{display:flex;flex-direction:column;align-items:center;gap:6px;padding-bottom:10px;margin-bottom:6px;border-bottom:1px solid var(--line);width:44px;max-height:46%;overflow:auto;flex:none;scrollbar-width:none}
+.conns{display:flex;flex-direction:column;align-items:center;gap:6px;padding:2px 0 10px;margin-bottom:6px;border-bottom:1px solid var(--line);width:64px;max-height:46%;overflow-y:auto;overflow-x:visible;flex:none;scrollbar-width:none}
+.conns .cx{margin:0 auto}
 .conns::-webkit-scrollbar{display:none}
 .cx{width:36px;height:36px;border-radius:var(--r);display:grid;place-items:center;font:600 12px/1 var(--mono);color:var(--text-2);background:var(--panel-2);border:1px solid var(--line);cursor:pointer;position:relative;transition:.15s var(--ease);flex:none;padding:0}
 .cx:hover{background:var(--hover);color:var(--text)}
-.cx.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+.cx.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.cx.on::before{content:"";position:absolute;left:-13px;top:8px;width:3px;height:20px;border-radius:2px;background:var(--accent)}
+.cx.prod.on::before{background:var(--danger)}
+.cx.prod.on{box-shadow:0 0 0 3px color-mix(in oklab,var(--danger) 18%,transparent)}
 .cx.ro{border-style:dashed}
 .cx.prod{border-color:color-mix(in oklab,var(--danger) 45%,transparent);color:var(--danger)}
-.cx.prod.on{background:color-mix(in oklab,var(--danger) 12%,transparent);border-color:color-mix(in oklab,var(--danger) 70%,transparent)}
+.cx.prod.on{background:color-mix(in oklab,var(--danger) 12%,transparent);border-color:var(--danger)}
 .cx i{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:var(--ok);border:2px solid var(--chrome)}
 .cx.off i{background:var(--text-3)}
 .cx.busy i{background:var(--warn)}

@@ -1,6 +1,6 @@
 [package]
 name = "ognom"
-version = "2.0.0"
+version = "2.0.1"
 description = "Ognom - the free, no-nonsense MongoDB desktop client"
 authors = ["Sunil Kr. Samanta"]
 license = "MIT"

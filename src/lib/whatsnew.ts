@@ -19,6 +19,20 @@ const SEEN_KEY = "ognom-whats-new-seen";
 
 export const SLIDES: WhatsNewSlide[] = [
   {
+    version: "2.0.1",
+    title: "Polish after the launch",
+    tagline: "The console, sanded down.",
+    points: [
+      "Query dock: a real editor - multi-line, auto-closing braces and quotes, field and operator completions from the sampled schema, run only by the button",
+      "Aggregate and Shell live in the dock next to Find; the view row is Table, Documents, Schema and Indexes",
+      "Regex and date literals in queries: /pattern/i, new RegExp(), new Date()",
+      "Drawer opens on Fields from the table and on JSON from Documents; insert works again",
+      "The active connection is unmistakable on the rail",
+      "Clear permission notices when your MongoDB user cannot see operations, the profiler, live stats or server details",
+      "Import / Export menu, redesigned About, floral Bloom themes, many small fixes",
+    ],
+  },
+  {
     version: "2.0.0",
     title: "Ognom 2.0",
     tagline: "A new console.",
