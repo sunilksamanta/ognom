@@ -87,6 +87,20 @@ export interface Tab {
   agg: AggState;
   shell: ShellState;
   drawer: DrawerState;
+  /** Copy number among tabs of the same collection (1, 2, ...). Stays fixed
+   *  for the tab's lifetime so "#2" keeps meaning the same tab. */
+  instance?: number;
+}
+
+/** The copy number to show for a tab, or null when it's the only tab of its
+ *  collection. Falls back to list order if stored numbers collide (older
+ *  snapshots have none). */
+export function tabNumber(tabs: Tab[], tab: Tab): number | null {
+  const same = tabs.filter((t) => t.database === tab.database && t.collection === tab.collection);
+  if (same.length < 2) return null;
+  const nums = same.map((t) => t.instance ?? 1);
+  if (new Set(nums).size === nums.length) return tab.instance ?? 1;
+  return same.indexOf(tab) + 1;
 }
 
 let nextId = 1;
@@ -148,6 +162,7 @@ export interface ExplorerSnapshot {
   expanded: Record<string, boolean>;
   sidebarFilter: string;
   selectedDb: string | null;
+  counts: Record<string, number>;
   tabs: Tab[];
   activeTabId: string | null;
 }
@@ -210,8 +225,9 @@ export const useExplorer = create<ExplorerState>((set, get) => {
 
   const tab = (id: string) => get().tabs.find((t) => t.id === id);
 
-  const makeTab = (database: string, collection: string, mode: TabMode = "table"): Tab => ({
+  const makeTab = (database: string, collection: string, mode: TabMode = "table", instance = 1): Tab => ({
     id: newId("tab"),
+    instance,
     database,
     collection,
     mode,
@@ -222,6 +238,23 @@ export const useExplorer = create<ExplorerState>((set, get) => {
   });
 
   const LAST_DB_KEY = "ognom-last-db";
+  /** Bumped whenever the explorer is swapped to another workspace, so a count
+   *  request still in flight for the old one can't land in the new one. */
+  let generation = 0;
+
+  /** Refresh the picker's document-count badges for one database. */
+  const loadCounts = async (db: string) => {
+    const gen = generation;
+    try {
+      const counts = await api.collectionCounts(db);
+      if (gen !== generation) return;
+      const next: Record<string, number> = {};
+      for (const [coll, n] of Object.entries(counts)) next[`${db}.${coll}`] = n;
+      set((s) => ({ counts: { ...s.counts, ...next } }));
+    } catch {
+      // decorative - the list works without counts
+    }
+  };
 
   return {
     databases: [],
@@ -234,7 +267,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     tabs: [],
     activeTabId: null,
 
-    reset: () =>
+    reset: () => {
+      generation++;
       set({
         databases: [],
         loadingDbs: false,
@@ -245,7 +279,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         counts: {},
         tabs: [],
         activeTabId: null,
-      }),
+      });
+    },
 
     snapshot: () => {
       const s = get();
@@ -255,6 +290,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         expanded: s.expanded,
         sidebarFilter: s.sidebarFilter,
         selectedDb: s.selectedDb,
+        counts: s.counts,
         tabs: s.tabs,
         activeTabId: s.activeTabId,
       };
@@ -265,6 +301,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         get().reset();
         return;
       }
+      generation++;
       set({
         databases: snap.databases,
         loadingDbs: false,
@@ -272,7 +309,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
         expanded: snap.expanded,
         sidebarFilter: snap.sidebarFilter,
         selectedDb: snap.selectedDb,
-        counts: {},
+        counts: snap.counts ?? {},
         tabs: snap.tabs,
         activeTabId: snap.activeTabId,
       });
@@ -307,22 +344,7 @@ export const useExplorer = create<ExplorerState>((set, get) => {
       if (!name) return;
       localStorage.setItem(LAST_DB_KEY, name);
       set((s) => ({ expanded: { ...s.expanded, [name]: true } }));
-      const colls = await get().loadCollections(name);
-      // Estimated counts for the picker, in the background and best-effort.
-      void (async () => {
-        for (const c of colls) {
-          if (get().selectedDb !== name) return;
-          if (c.kind === "view") continue;
-          try {
-            const st = await api.collectionStats(name, c.name);
-            if (st.count != null) {
-              set((s) => ({ counts: { ...s.counts, [`${name}.${c.name}`]: st.count! } }));
-            }
-          } catch {
-            // ignore - counts are decorative
-          }
-        }
-      })();
+      await get().loadCollections(name);
     },
 
     setDrawer: (id, drawer) => patchTab(id, (t) => ({ ...t, drawer })),
@@ -345,6 +367,8 @@ export const useExplorer = create<ExplorerState>((set, get) => {
       try {
         const colls = await api.listCollections(db);
         set((s) => ({ collections: { ...s.collections, [db]: colls } }));
+        // Counts refresh with every (re)load: select, refresh button, workspace switch.
+        void loadCounts(db);
         return colls;
       } catch (e) {
         toast.error(errMsg(e));
@@ -376,7 +400,15 @@ export const useExplorer = create<ExplorerState>((set, get) => {
     },
 
     openCollectionInNewTab: (database, collection) => {
-      const tab = makeTab(database, collection);
+      // Lowest copy number not taken by another tab of this collection.
+      const taken = new Set(
+        get()
+          .tabs.filter((t) => t.database === database && t.collection === collection)
+          .map((t) => t.instance ?? 1)
+      );
+      let instance = 1;
+      while (taken.has(instance)) instance++;
+      const tab = makeTab(database, collection, "table", instance);
       set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
       void get().runFind(tab.id);
     },

@@ -85,7 +85,7 @@ export function ConfirmDialog({
                 <label>
                   {confirmPhraseLabel ?? (
                     <>
-                      Type <span className="text-text">{confirmPhrase}</span> to confirm
+                      Type <span className="normal-case tracking-normal text-text">{confirmPhrase}</span> to confirm
                     </>
                   )}
                 </label>
@@ -100,6 +100,9 @@ export function ConfirmDialog({
                   placeholder={confirmPhrase}
                   autoFocus
                 />
+                {!phraseOk && phrase.trim().toLowerCase() === confirmPhrase.trim().toLowerCase() && (
+                  <span className="hint text-warn">Case matters - type it exactly as shown.</span>
+                )}
               </div>
             )}
           </DialogBody>

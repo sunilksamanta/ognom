@@ -37,6 +37,10 @@ pub struct ExportConn {
     pub uri_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
+    #[serde(default)]
+    pub ssh: crate::ssh::SshConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_secret: Option<String>,
 }
 
 /// Argon2 parameters, stored alongside the ciphertext so import can re-derive.
@@ -117,6 +121,7 @@ pub fn build_export(
             .into_iter()
             .map(|mut c| {
                 c.secret = None;
+                c.ssh_secret = None;
                 c
             })
             .collect();
@@ -245,6 +250,8 @@ mod tests {
             fields: ConnFields::default(),
             uri_summary: Some("mongodb+srv://u@c.mongodb.net".into()),
             secret: Some("mongodb+srv://u:hunter2@c.mongodb.net/".into()),
+            ssh: Default::default(),
+            ssh_secret: Some("bastion-pass".into()),
         }]
     }
 
@@ -254,6 +261,7 @@ mod tests {
         assert!(!json.contains("hunter2"));
         let back = parse_export(&json, None).unwrap();
         assert!(back[0].secret.is_none());
+        assert!(!json.contains("bastion-pass"));
     }
 
     #[test]

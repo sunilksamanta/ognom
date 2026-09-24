@@ -1,7 +1,7 @@
 import { Brush, Search, Settings } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConnections } from "@/stores/connections";
-import { useExplorer } from "@/stores/explorer";
+import { tabNumber, useExplorer } from "@/stores/explorer";
 import { useUi } from "@/stores/ui";
 import { dragWindow } from "@/lib/window";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,10 @@ export function Titlebar() {
     (s) => s.workspaces.find((w) => w.info.id === s.activeId)?.readOnly ?? false
   );
   const tab = useExplorer((s) => s.tabs.find((t) => t.id === s.activeTabId));
+  const tabNo = useExplorer((s) => {
+    const t = s.tabs.find((x) => x.id === s.activeTabId);
+    return t ? tabNumber(s.tabs, t) : null;
+  });
   const setPalette = useUi((s) => s.setPalette);
   const ui = useUi((s) => s.set);
 
@@ -48,7 +52,8 @@ export function Titlebar() {
         <i className={cn("dot", dotClass)} />
         {tab ? (
           <>
-            <b>{tab.collection}</b>· {tab.database} · {active?.name} · {host}
+            <b>{tab.collection}</b>
+            {tabNo && <span className="tabno">#{tabNo}</span>}· {tab.database} · {active?.name} · {host}
           </>
         ) : active ? (
           <>

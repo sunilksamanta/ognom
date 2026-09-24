@@ -20,6 +20,8 @@ use crate::shell::{self, Statement};
 pub struct PooledConn {
     pub client: Client,
     pub info: ConnectionInfo,
+    /// SSH tunnel the client talks through; dropped with the workspace.
+    pub _tunnel: Option<crate::ssh::Tunnel>,
 }
 
 /// All connections the user has open at once. Switching workspaces just
@@ -130,6 +132,8 @@ pub struct ConnectionInfo {
     pub color: Option<String>,
     /// "readwrite" | "readonly" | "production" - drives the default write guard.
     pub access: String,
+    /// "user@bastion" when the connection runs through an SSH tunnel.
+    pub ssh: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -149,7 +153,15 @@ pub struct SecurityInfo {
     pub degraded: bool,
 }
 
-async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppResult<(Client, ConnectionInfo)> {
+type SshParams = Option<(crate::ssh::SshConfig, Option<String>)>;
+
+async fn establish(
+    uri: &str,
+    name: String,
+    profile_id: Option<String>,
+    ssh: SshParams,
+    data_dir: &std::path::Path,
+) -> AppResult<(Client, ConnectionInfo, Option<crate::ssh::Tunnel>)> {
     let mut options = match ClientOptions::parse(uri).await {
         Ok(opts) => opts,
         Err(first) => {
@@ -178,6 +190,36 @@ async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppRe
         .map(|h| h.to_string())
         .collect::<Vec<_>>()
         .join(",");
+
+    // SSH: forward a local port to the first host (as the bastion sees it) and
+    // point the driver at it directly - replica-set discovery would hand back
+    // member addresses that only resolve on the far side of the bastion.
+    let tunnel = match &ssh {
+        Some((cfg, secret)) => {
+            let (target_host, target_port) = match options.hosts.first() {
+                Some(mongodb::options::ServerAddress::Tcp { host, port }) => {
+                    (host.clone(), port.unwrap_or(27017))
+                }
+                _ => return Err(AppError::Other("SSH tunnels need a TCP host".into())),
+            };
+            let tunnel =
+                crate::ssh::open(cfg, secret.as_deref(), &target_host, target_port, data_dir).await?;
+            options.hosts = vec![mongodb::options::ServerAddress::Tcp {
+                host: "127.0.0.1".into(),
+                port: Some(tunnel.local_port),
+            }];
+            options.direct_connection = Some(true);
+            options.load_balanced = None;
+            // The certificate names the real host, not 127.0.0.1, and the rustls
+            // backend can't skip only the hostname check. The leg to the bastion
+            // is already authenticated by its SSH host key.
+            if let Some(mongodb::options::Tls::Enabled(ref mut tls)) = options.tls {
+                tls.allow_invalid_certificates = Some(true);
+            }
+            Some(tunnel)
+        }
+        None => None,
+    };
 
     let client = Client::with_options(options)?;
 
@@ -217,8 +259,9 @@ async fn establish(uri: &str, name: String, profile_id: Option<String>) -> AppRe
         latency_ms,
         color: None,
         access: crate::profiles::default_access(),
+        ssh: ssh.as_ref().map(|(cfg, _)| cfg.summary()),
     };
-    Ok((client, info))
+    Ok((client, info, tunnel))
 }
 
 /// "macOS · arm64" style environment line for the empty-pane version block.
@@ -287,6 +330,27 @@ pub async fn test_connection(
     state: State<'_, AppState>,
 ) -> AppResult<TestResult> {
     let crypto = state.crypto();
+    let ssh: SshParams = match (&input, &profile_id) {
+        (Some(input), _) if input.ssh.is_active() => {
+            // Blank secret while editing: borrow the stored one.
+            let typed = input.ssh_secret.clone().filter(|s| !s.is_empty());
+            let stored = match (&typed, &input.id) {
+                (None, Some(id)) => state
+                    .store
+                    .lock()
+                    .unwrap()
+                    .ssh_for(id, &crypto)
+                    .ok()
+                    .flatten()
+                    .and_then(|(_, s)| s),
+                _ => None,
+            };
+            Some((input.ssh.clone(), typed.or(stored)))
+        }
+        (Some(_), _) => None,
+        (None, Some(id)) => state.store.lock().unwrap().ssh_for(id, &crypto)?,
+        (None, None) => None,
+    };
     let uri = match (&input, &profile_id) {
         (Some(input), _) => {
             // When editing a saved profile without retyping the password,
@@ -307,9 +371,10 @@ pub async fn test_connection(
         (None, None) => return Err(AppError::Other("nothing to test".into())),
     };
 
-    match establish(&uri, "test".into(), None).await {
-        Ok((client, info)) => {
+    match establish(&uri, "test".into(), None, ssh, &state.data_dir).await {
+        Ok((client, info, tunnel)) => {
             drop(client);
+            drop(tunnel);
             Ok(TestResult {
                 ok: true,
                 server_version: Some(info.server_version),
@@ -330,7 +395,7 @@ pub async fn test_connection(
 
 #[tauri::command]
 pub async fn connect(profile_id: String, state: State<'_, AppState>) -> AppResult<ConnectionInfo> {
-    let (uri, name, color, access) = {
+    let (uri, name, color, access, ssh) = {
         let crypto = state.crypto();
         let store = state.store.lock().unwrap();
         let profile = store.get(&profile_id)?;
@@ -339,16 +404,18 @@ pub async fn connect(profile_id: String, state: State<'_, AppState>) -> AppResul
             profile.name.clone(),
             profile.color.clone(),
             profile.access.clone(),
+            store.ssh_for(&profile_id, &crypto)?,
         )
     };
-    let (client, mut info) = establish(&uri, name, Some(profile_id.clone())).await?;
+    let (client, mut info, tunnel) =
+        establish(&uri, name, Some(profile_id.clone()), ssh, &state.data_dir).await?;
     info.id = profile_id.clone();
     info.color = color;
     info.access = access;
     {
         let mut s = state.sessions.lock().await;
         s.pool
-            .insert(profile_id.clone(), PooledConn { client, info: info.clone() });
+            .insert(profile_id.clone(), PooledConn { client, info: info.clone(), _tunnel: tunnel });
         s.active = Some(profile_id.clone());
     }
     state.store.lock().unwrap().touch(&profile_id)?;
@@ -366,13 +433,17 @@ pub async fn connect_input(
         "adhoc-{}",
         state.adhoc_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
-    let (client, mut info) = establish(&uri, name, None).await?;
+    let ssh = input
+        .ssh
+        .is_active()
+        .then(|| (input.ssh.clone(), input.ssh_secret.clone().filter(|s| !s.is_empty())));
+    let (client, mut info, tunnel) = establish(&uri, name, None, ssh, &state.data_dir).await?;
     info.id = id.clone();
     info.color = input.color.clone();
     info.access = input.access.clone();
     {
         let mut s = state.sessions.lock().await;
-        s.pool.insert(id.clone(), PooledConn { client, info: info.clone() });
+        s.pool.insert(id.clone(), PooledConn { client, info: info.clone(), _tunnel: tunnel });
         s.active = Some(id);
     }
     Ok(info)
@@ -852,36 +923,45 @@ pub async fn duplicate_collection(
 }
 
 // ---------------------------------------------------------------------------
-// schema relations map
+// database overview - per-collection storage, indexes and inferred references
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct RelationNode {
-    pub name: String,
-    pub count: u64,
-    pub fields: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RelationEdge {
-    pub from: String,
+pub struct CollectionRef {
     pub field: String,
     pub to: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RelationReport {
-    pub nodes: Vec<RelationNode>,
-    pub edges: Vec<RelationEdge>,
-    /// True when the collection list was capped.
-    pub truncated: bool,
+pub struct CollectionOverview {
+    pub name: String,
+    /// "collection" | "view" | "timeseries"
+    pub kind: String,
+    pub count: Option<i64>,
+    pub size: Option<i64>,
+    pub avg_obj_size: Option<i64>,
+    pub storage_size: Option<i64>,
+    pub total_index_size: Option<i64>,
+    pub nindexes: Option<i64>,
+    pub capped: bool,
+    pub validated: bool,
+    /// Reference-shaped fields pointing at other collections (sampled).
+    pub refs: Vec<CollectionRef>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbOverview {
+    pub database: String,
+    pub collections: Vec<CollectionOverview>,
+    /// Collections whose references were not sampled (list above the cap).
+    pub refs_skipped: usize,
 }
 
 /// Candidate collection names a reference field could point at:
-/// "user" / "userId" / "user_id" → users, user; "category" → categories.
+/// "user" / "userId" / "user_id" -> users, user; "category" -> categories.
 fn reference_targets(field: &str) -> Vec<String> {
     let base = field
         .strip_suffix("_id")
@@ -900,92 +980,202 @@ fn reference_targets(field: &str) -> Vec<String> {
     out
 }
 
-/// Infer the database's entity graph: sample every collection, then link
-/// fields that (a) look like references by name (user / userId / user_id) and
-/// (b) hold ObjectId-ish values, to the collection their name points at.
+fn num(d: &Document, key: &str) -> Option<i64> {
+    match d.get(key)? {
+        Bson::Int32(v) => Some(i64::from(*v)),
+        Bson::Int64(v) => Some(*v),
+        Bson::Double(v) => Some(*v as i64),
+        _ => None,
+    }
+}
+
+/// Sample a collection and return its reference-shaped fields: ObjectIds (or
+/// arrays of them / 24-hex strings) whose field name points at another
+/// collection in `lower` (lowercased name -> real name).
+async fn sample_refs(
+    coll: &mongodb::Collection<Document>,
+    name: &str,
+    lower: &std::collections::HashMap<String, String>,
+) -> Vec<CollectionRef> {
+    const SAMPLE: i64 = 25;
+    let docs: Vec<Document> = match coll.aggregate(vec![doc! {"$sample": {"size": SAMPLE}}]).await {
+        Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
+        Err(_) => return Vec::new(),
+    };
+    let mut ref_fields: std::collections::BTreeSet<String> = Default::default();
+    for d in &docs {
+        for (k, v) in d {
+            let is_ref_value = match v {
+                Bson::ObjectId(_) => true,
+                Bson::String(s) => s.len() == 24 && s.chars().all(|c| c.is_ascii_hexdigit()),
+                Bson::Array(arr) => arr.iter().any(|e| matches!(e, Bson::ObjectId(_))),
+                _ => false,
+            };
+            if is_ref_value && k != "_id" {
+                ref_fields.insert(k.clone());
+            }
+        }
+    }
+    let mut refs = Vec::new();
+    for field in ref_fields {
+        for target in reference_targets(&field) {
+            if let Some(actual) = lower.get(&target) {
+                if actual != name {
+                    refs.push(CollectionRef { field: field.clone(), to: actual.clone() });
+                    break;
+                }
+            }
+        }
+    }
+    refs
+}
+
+/// One pass over a database: storage + index stats for every collection
+/// ($collStats), options (capped, validator) and, for the first
+/// `MAX_REF_SAMPLES` collections, inferred references. Runs a few
+/// collections concurrently so large databases stay quick.
 #[tauri::command]
-pub async fn db_relations(database: String, state: State<'_, AppState>) -> AppResult<RelationReport> {
-    const MAX_COLLECTIONS: usize = 30;
-    const SAMPLE: i64 = 50;
+pub async fn db_overview(database: String, state: State<'_, AppState>) -> AppResult<DbOverview> {
+    use futures::StreamExt;
+    const MAX_REF_SAMPLES: usize = 150;
+    const CONCURRENCY: usize = 8;
 
     let client = current_client(&state).await?;
     let db = client.database(&database);
-    let mut names: Vec<String> = db
-        .list_collection_names()
+    let mut specs: Vec<_> = db
+        .list_collections()
+        .await?
+        .try_collect::<Vec<_>>()
         .await?
         .into_iter()
-        .filter(|n| !n.starts_with("system."))
+        .filter(|s| !s.name.starts_with("system."))
         .collect();
-    names.sort();
-    let truncated = names.len() > MAX_COLLECTIONS;
-    names.truncate(MAX_COLLECTIONS);
+    specs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-    let lower: std::collections::HashMap<String, String> =
-        names.iter().map(|n| (n.to_lowercase(), n.clone())).collect();
+    let lower: Arc<std::collections::HashMap<String, String>> =
+        Arc::new(specs.iter().map(|s| (s.name.to_lowercase(), s.name.clone())).collect());
+    let refs_skipped = specs.len().saturating_sub(MAX_REF_SAMPLES);
 
-    let mut nodes: Vec<RelationNode> = Vec::new();
-    let mut edges: Vec<RelationEdge> = Vec::new();
-
-    for name in &names {
-        let coll = db.collection::<Document>(name);
-        let count = coll.estimated_document_count().await.unwrap_or(0);
-        let docs: Vec<Document> = match coll
-            .aggregate(vec![doc! {"$sample": {"size": SAMPLE}}])
-            .await
-        {
-            Ok(cursor) => cursor.try_collect().await.unwrap_or_default(),
-            Err(_) => Vec::new(), // views can't $sample - node stays edge-less
-        };
-
-        let mut fields: Vec<String> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        let mut ref_fields: std::collections::HashMap<String, bool> =
-            std::collections::HashMap::new();
-
-        for d in &docs {
-            for (k, v) in d {
-                if seen.insert(k.clone()) {
-                    fields.push(k.clone());
-                }
-                // Reference-shaped value? ObjectId, array of ObjectIds, or a
-                // 24-hex string (apps that store ids as strings).
-                let is_ref_value = match v {
-                    Bson::ObjectId(_) => true,
-                    Bson::String(s) => {
-                        s.len() == 24 && s.chars().all(|c| c.is_ascii_hexdigit())
-                    }
-                    Bson::Array(arr) => arr.iter().any(|e| matches!(e, Bson::ObjectId(_))),
-                    _ => false,
+    let collections: Vec<CollectionOverview> = futures::stream::iter(specs.into_iter().enumerate())
+        .map(|(i, spec)| {
+            let db = db.clone();
+            let lower = lower.clone();
+            async move {
+                let kind = format!("{:?}", spec.collection_type).to_lowercase();
+                let capped = spec.options.capped.unwrap_or(false);
+                let validated = spec.options.validator.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
+                let mut out = CollectionOverview {
+                    name: spec.name.clone(),
+                    kind: kind.clone(),
+                    count: None,
+                    size: None,
+                    avg_obj_size: None,
+                    storage_size: None,
+                    total_index_size: None,
+                    nindexes: None,
+                    capped,
+                    validated,
+                    refs: Vec::new(),
                 };
-                if is_ref_value && k != "_id" {
-                    ref_fields.entry(k.clone()).or_insert(true);
+                if kind == "view" {
+                    return out;
                 }
-            }
-        }
-
-        for field in ref_fields.keys() {
-            for target in reference_targets(field) {
-                if let Some(actual) = lower.get(&target) {
-                    if actual != name {
-                        edges.push(RelationEdge {
-                            from: name.clone(),
-                            field: field.clone(),
-                            to: actual.clone(),
-                        });
-                        break;
+                let coll = db.collection::<Document>(&spec.name);
+                if let Ok(cursor) = coll.aggregate(vec![doc! {"$collStats": {"storageStats": {}}}]).await {
+                    let docs: Vec<Document> = cursor.try_collect().await.unwrap_or_default();
+                    // Sharded collections return one document per shard - sum them.
+                    for d in &docs {
+                        if let Ok(st) = d.get_document("storageStats") {
+                            let add = |acc: Option<i64>, v: Option<i64>| match (acc, v) {
+                                (Some(a), Some(b)) => Some(a + b),
+                                (a, b) => a.or(b),
+                            };
+                            out.count = add(out.count, num(st, "count"));
+                            out.size = add(out.size, num(st, "size"));
+                            out.storage_size = add(out.storage_size, num(st, "storageSize"));
+                            out.total_index_size = add(out.total_index_size, num(st, "totalIndexSize"));
+                            out.nindexes = out.nindexes.max(num(st, "nindexes"));
+                        }
                     }
+                    out.avg_obj_size = match (out.size, out.count) {
+                        (Some(s), Some(c)) if c > 0 => Some(s / c),
+                        _ => None,
+                    };
                 }
+                if out.count.is_none() {
+                    out.count = coll.estimated_document_count().await.ok().map(|c| c as i64);
+                }
+                if i < MAX_REF_SAMPLES {
+                    out.refs = sample_refs(&coll, &spec.name, &lower).await;
+                }
+                out
+            }
+        })
+        .buffered(CONCURRENCY)
+        .collect()
+        .await;
+
+    Ok(DbOverview { database, collections, refs_skipped })
+}
+
+/// Estimated document counts for every collection of a database in one call
+/// (picker badges). Uses the metadata-only `count` path, which needs only the
+/// `find` privilege (unlike $collStats), and asks several collections at once.
+/// Collections that fail or time out are simply missing from the map.
+#[tauri::command]
+pub async fn collection_counts(
+    database: String,
+    workspace: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<std::collections::HashMap<String, u64>> {
+    use futures::StreamExt;
+    let client = client_for(&state, workspace.as_deref()).await?;
+    let db = client.database(&database);
+    let specs: Vec<_> = db.list_collections().await?.try_collect().await?;
+    let counts = futures::stream::iter(
+        specs
+            .into_iter()
+            .filter(|s| !matches!(s.collection_type, mongodb::results::CollectionType::View))
+            .map(|s| s.name),
+    )
+    .map(|name| {
+        let coll = db.collection::<Document>(&name);
+        async move {
+            let n = tokio::time::timeout(COUNT_TIMEOUT, coll.estimated_document_count()).await;
+            match n {
+                Ok(Ok(n)) => Some((name, n)),
+                _ => None,
             }
         }
+    })
+    .buffer_unordered(12)
+    .filter_map(|x| async move { x })
+    .collect()
+    .await;
+    Ok(counts)
+}
 
-        fields.truncate(40);
-        nodes.push(RelationNode { name: name.clone(), count, fields });
-    }
+/// Round-trip time (ms) to a workspace's server - drives the picker footer's
+/// health line.
+#[tauri::command]
+pub async fn ping_workspace(workspace: Option<String>, state: State<'_, AppState>) -> AppResult<u64> {
+    let client = client_for(&state, workspace.as_deref()).await?;
+    let started = Instant::now();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        client.database("admin").run_command(doc! {"ping": 1}),
+    )
+    .await
+    .map_err(|_| AppError::Mongo("ping timed out".into()))??;
+    Ok(started.elapsed().as_millis() as u64)
+}
 
-    edges.sort_by(|a, b| (a.from.clone(), a.field.clone()).cmp(&(b.from.clone(), b.field.clone())));
-    edges.dedup_by(|a, b| a.from == b.from && a.field == b.field && a.to == b.to);
-
-    Ok(RelationReport { nodes, edges, truncated })
+/// Write a small text file the UI produced (e.g. an overview export) to a
+/// path the user picked in the save dialog.
+#[tauri::command]
+pub fn save_text_file(path: String, content: String) -> AppResult<()> {
+    std::fs::write(&path, content)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -2287,6 +2477,30 @@ pub async fn analyze_schema(
         .collect();
 
     Ok(json!({ "sampled": sampled, "fields": result }))
+}
+
+/// Nested shape of a collection's documents from a random sample, for the
+/// TypeScript / Zod exporter (see `typetree.rs`).
+#[tauri::command]
+pub async fn infer_schema_tree(
+    database: String,
+    collection: String,
+    sample_size: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let sample_size = sample_size.unwrap_or(1000).clamp(10, 10_000);
+    let mut cursor = coll
+        .aggregate(vec![doc! { "$sample": { "size": sample_size } }])
+        .await?;
+    let mut root = crate::typetree::Shape::new();
+    let mut sampled = 0i64;
+    while let Some(d) = cursor.try_next().await? {
+        root.add_doc(&d);
+        sampled += 1;
+    }
+    Ok(json!({ "sampled": sampled, "root": root.to_json() }))
 }
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,28 @@ export const emptyFields = (): ConnFields => ({
   tlsInsecure: false,
 });
 
+export type SshAuth = "password" | "key" | "agent";
+
+/** Optional SSH tunnel (bastion) a connection runs through. The password or
+ *  key passphrase is stored encrypted separately, never in this object. */
+export interface SshConfig {
+  enabled: boolean;
+  host: string;
+  port?: number | null;
+  username: string;
+  auth: SshAuth;
+  keyPath?: string | null;
+}
+
+export const emptySsh = (): SshConfig => ({
+  enabled: false,
+  host: "",
+  port: 22,
+  username: "",
+  auth: "key",
+  keyPath: "~/.ssh/id_ed25519",
+});
+
 export type ProfileKind = "fields" | "uri";
 
 /** Session access of a saved connection. Read-only and production open
@@ -50,6 +72,9 @@ export interface ProfileInput {
   fields: ConnFields;
   uri?: string | null;
   password?: string | null;
+  ssh?: SshConfig;
+  /** SSH password / key passphrase; null on edit keeps the stored one. */
+  sshSecret?: string | null;
 }
 
 export interface ProfileSummary {
@@ -63,6 +88,8 @@ export interface ProfileSummary {
   tls: boolean;
   hasSecret: boolean;
   fields: ConnFields;
+  ssh: SshConfig;
+  hasSshSecret: boolean;
   lastUsedAt?: string | null;
 }
 
@@ -77,6 +104,8 @@ export interface ConnectionInfo {
   latencyMs: number;
   color?: string | null;
   access: AccessMode;
+  /** "user@bastion" when connected through an SSH tunnel. */
+  ssh?: string | null;
 }
 
 export interface TestResult {
@@ -111,6 +140,26 @@ export interface ImportOutcome {
   imported: number;
   /** How many imported connections still need a password / connection string. */
   needsPassword: number;
+}
+
+export interface CollectionOverview {
+  name: string;
+  kind: "collection" | "view" | "timeseries";
+  count?: number | null;
+  size?: number | null;
+  avgObjSize?: number | null;
+  storageSize?: number | null;
+  totalIndexSize?: number | null;
+  nindexes?: number | null;
+  capped: boolean;
+  validated: boolean;
+  refs: { field: string; to: string }[];
+}
+
+export interface DbOverview {
+  database: string;
+  collections: CollectionOverview[];
+  refsSkipped: number;
 }
 
 export interface SecurityInfo {
@@ -409,6 +458,9 @@ export const api = {
   listDatabases: (workspace?: string) => invoke<DbInfo[]>("list_databases", { workspace }),
   listCollections: (database: string, workspace?: string) =>
     invoke<CollInfo[]>("list_collections", { database, workspace }),
+  /** Estimated document count per collection name (views and failures omitted). */
+  collectionCounts: (database: string, workspace?: string) =>
+    invoke<Record<string, number>>("collection_counts", { database, workspace }),
 
   // documents
   findDocuments: (req: FindRequest) => invoke<DocsPage>("find_documents", { req }),
@@ -511,6 +563,9 @@ export const api = {
   }) => invoke<ExplainSummary>("explain_query", args),
   analyzeSchema: (database: string, collection: string, sampleSize?: number) =>
     invoke<SchemaReport>("analyze_schema", { database, collection, sampleSize }),
+  /** Nested shape for the TypeScript / Zod exporter. */
+  inferSchemaTree: (database: string, collection: string, sampleSize?: number) =>
+    invoke<import("@/lib/tsgen").SchemaTree>("infer_schema_tree", { database, collection, sampleSize }),
   collectionFields: (database: string, collection: string, limit?: number) =>
     invoke<string[]>("collection_fields", { database, collection, limit }),
   exportCollection: (args: {
@@ -526,13 +581,10 @@ export const api = {
   importDocuments: w((database: string, collection: string, path: string, jobId?: string) =>
     invoke<CopyOutcome>("import_documents", { database, collection, path, jobId })),
 
-  // schema relations
-  dbRelations: (database: string) =>
-    invoke<{
-      nodes: { name: string; count: number; fields: string[] }[];
-      edges: { from: string; field: string; to: string }[];
-      truncated: boolean;
-    }>("db_relations", { database }),
+  // database overview
+  dbOverview: (database: string) => invoke<DbOverview>("db_overview", { database }),
+  pingWorkspace: (workspace?: string) => invoke<number>("ping_workspace", { workspace }),
+  saveTextFile: (path: string, content: string) => invoke<void>("save_text_file", { path, content }),
 
   // ops panel
   currentOps: () => invoke<Doc[]>("current_ops"),

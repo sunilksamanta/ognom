@@ -13,7 +13,7 @@ import { ShellPane } from "@/components/shell/ShellPane";
 import { IndexesPane } from "@/components/explorer/IndexesSheet";
 import { SchemaPane } from "@/components/explorer/SchemaSheet";
 import { Dock } from "@/components/explorer/Dock";
-import { useExplorer, type Tab, type TabMode } from "@/stores/explorer";
+import { tabNumber, useExplorer, type Tab, type TabMode } from "@/stores/explorer";
 import { useSettings } from "@/stores/settings";
 import { useConnections } from "@/stores/connections";
 import { api, type CollectionStats } from "@/lib/api";
@@ -36,6 +36,11 @@ const VIEWS: { id: TabMode; label: string }[] = [
  */
 export const CollectionView = memo(function CollectionView({ tab, active }: { tab: Tab; active: boolean }) {
   const setTabMode = useExplorer((s) => s.setTabMode);
+  // Primitive result, so this only re-renders when the number itself changes.
+  const tabNo = useExplorer((s) => {
+    const t = s.tabs.find((x) => x.id === tab.id);
+    return t ? tabNumber(s.tabs, t) : null;
+  });
   const setDrawer = useExplorer((s) => s.setDrawer);
   const runFind = useExplorer((s) => s.runFind);
   const advancedMode = useSettings((s) => s.advancedMode);
@@ -66,7 +71,14 @@ export const CollectionView = memo(function CollectionView({ tab, active }: { ta
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="ctx no-select">
         <div className="min-w-0">
-          <h1 title={`${tab.database}.${tab.collection}`}>{tab.collection}</h1>
+          <h1 title={`${tab.database}.${tab.collection}`}>
+            {tab.collection}
+            {tabNo && (
+              <span className="tabno" style={{ marginLeft: 8 }} title={`Tab ${tabNo} of ${tab.collection}`}>
+                #{tabNo}
+              </span>
+            )}
+          </h1>
           <div className="sub">
             {tab.database} · {count === null || count === undefined ? "?" : formatCount(count)} documents
             {stats?.nindexes != null && (

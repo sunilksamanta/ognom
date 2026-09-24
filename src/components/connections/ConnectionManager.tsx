@@ -70,8 +70,9 @@ export function ConnectionManager() {
         fields: p.fields,
         uri: null,
         password: null,
+        ssh: p.ssh,
       });
-      toast.success(p.hasSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
+      toast.success(p.hasSecret || p.hasSshSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -317,7 +318,12 @@ export function ConnectionManager() {
         open={deleting !== null}
         onOpenChange={(o) => !o && setDeleting(null)}
         title={`Delete "${deleting?.name}"?`}
-        description="The saved connection and its encrypted credentials will be removed. This cannot be undone."
+        description={
+          <>
+            The saved connection and its encrypted credentials will be removed. This cannot be undone.
+            {deleting && workspaces.some((w) => w.info.profileId === deleting.id) && " It is open right now and will be disconnected first."}
+          </>
+        }
         confirmLabel="Delete"
         destructive
         busy={busy}

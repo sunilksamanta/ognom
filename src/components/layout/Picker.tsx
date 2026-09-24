@@ -9,7 +9,8 @@ import {
   FolderOpen,
   GitCompare,
   Loader2,
-  Network,
+  BarChart3,
+  FileCode2,
   Pin,
   PinOff,
   RefreshCw,
@@ -40,18 +41,69 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CopyCollectionDialog } from "@/components/explorer/CopyCollectionDialog";
 import { DiffCollectionDialog } from "@/components/explorer/DiffCollectionDialog";
-import { RelationsDialog } from "@/components/explorer/RelationsDialog";
+import { DbOverviewDialog } from "@/components/explorer/DbOverviewDialog";
+import { TypeExportDialog } from "@/components/explorer/TypeExportDialog";
 import { DuplicateCollectionDialog } from "@/components/explorer/DuplicateCollectionDialog";
 import { DropCollectionDialog, ClearCollectionDialog } from "@/components/explorer/CollectionDangerDialogs";
-import { useExplorer } from "@/stores/explorer";
+import { tabNumber, useExplorer } from "@/stores/explorer";
 import { useConnections } from "@/stores/connections";
 import { PICKER_DEFAULT, PICKER_MAX, PICKER_MIN, useSettings } from "@/stores/settings";
 import { useUi } from "@/stores/ui";
+import { api, errMsg } from "@/lib/api";
 import { formatBytes, formatCount } from "@/lib/bson";
 import { cn } from "@/lib/utils";
 
 const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
 const NONE: string[] = [];
+
+/** Live round-trip time to the active server, re-measured every 15 s while
+ *  the window is visible. Local state only, so the tick re-renders just this. */
+function Latency({ workspaceId, host, ssh }: { workspaceId: string; host: string; ssh?: string | null }) {
+  const [ms, setMs] = useState<number | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      if (document.hidden) return;
+      api
+        .pingWorkspace(workspaceId)
+        .then((v) => {
+          if (alive) {
+            setMs(v);
+            setFailed(null);
+          }
+        })
+        .catch((e) => alive && setFailed(errMsg(e)));
+    };
+    tick();
+    const t = window.setInterval(tick, 15_000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [workspaceId]);
+
+  const tone = failed ? "dgr" : ms === null ? "off" : ms > 400 ? "dgr" : ms > 120 ? "warn" : "";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 tabular-nums">
+          <i className={cn("dot", tone)} />
+          {failed ? "unreachable" : ms === null ? "..." : `${ms} ms`}
+          {ssh && <span className="text-text-3">· ssh</span>}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="font-mono text-[11px]">
+          <div>{failed ? `Ping failed: ${failed}` : "Round trip to the server, checked every 15 s"}</div>
+          <div className="text-text-3">{host}</div>
+          {ssh && <div className="text-text-3">via SSH {ssh}</div>}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function CollIcon({ kind }: { kind: string }) {
   if (kind === "view") return <Eye className="text-accent-2" />;
@@ -86,8 +138,6 @@ export function Picker() {
   const activeColl = useExplorer((s) => s.tabs.find((t) => t.id === s.activeTabId)?.collection);
 
   const active = useConnections((s) => s.active);
-  const workspaces = useConnections((s) => s.workspaces);
-  const profiles = useConnections((s) => s.profiles);
   const readOnly = useConnections(
     (s) => s.workspaces.find((w) => w.info.id === s.activeId)?.readOnly ?? false
   );
@@ -114,7 +164,8 @@ export function Picker() {
   const [dupTarget, setDupTarget] = useState<Target | null>(null);
   const [copyTarget, setCopyTarget] = useState<Target | null>(null);
   const [diffTarget, setDiffTarget] = useState<Target | null>(null);
-  const [relationsDb, setRelationsDb] = useState<string | null>(null);
+  const [overviewDb, setOverviewDb] = useState<string | null>(null);
+  const [typesTarget, setTypesTarget] = useState<Target | null>(null);
   const [clearTarget, setClearTarget] = useState<Target | null>(null);
   const [dropTarget, setDropTarget] = useState<Target | null>(null);
 
@@ -131,8 +182,8 @@ export function Picker() {
   }, [collections, selectedDb, filter]);
 
   const dbInfo = databases.find((d) => d.name === selectedDb);
-  const live = workspaces.length;
-  const total = profiles.length + workspaces.filter((w) => !w.info.profileId).length;
+  const allColls = selectedDb ? collections[selectedDb] ?? null : null;
+  const viewCount = allColls?.filter((c) => c.kind === "view").length ?? 0;
 
   const pinnedItems = pinned
     .map((key) => {
@@ -202,6 +253,9 @@ export function Picker() {
       <ContextMenuItem onSelect={() => setDiffTarget({ db, coll })}>
         <GitCompare /> Diff with
       </ContextMenuItem>
+      <ContextMenuItem onSelect={() => setTypesTarget({ db, coll })}>
+        <FileCode2 /> Export TypeScript types
+      </ContextMenuItem>
       {kind !== "view" && (
         <>
           <ContextMenuSeparator />
@@ -262,8 +316,8 @@ export function Picker() {
               <RefreshCw className="h-3.5 w-3.5" /> Refresh databases
             </DropdownMenuItem>
             {selectedDb && (
-              <DropdownMenuItem onSelect={() => setRelationsDb(selectedDb)} className="gap-2">
-                <Network className="h-3.5 w-3.5" /> Schema map of {selectedDb}
+              <DropdownMenuItem onSelect={() => setOverviewDb(selectedDb)} className="gap-2">
+                <BarChart3 className="h-3.5 w-3.5" /> Overview of {selectedDb}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
@@ -318,6 +372,10 @@ export function Picker() {
                         {t.database !== selectedDb && <span className="text-text-3">{t.database}.</span>}
                         {t.collection}
                       </span>
+                      {(() => {
+                        const no = tabNumber(tabs, t);
+                        return no && <span className="tabno" title={`Tab ${no} of ${t.collection}`}>#{no}</span>;
+                      })()}
                       <span
                         className="x"
                         role="button"
@@ -457,12 +515,16 @@ export function Picker() {
       </div>
 
       <div className="pickfoot">
-        <i className={cn("dot", live === 0 && "off")} />
-        {total} connection{total === 1 ? "" : "s"} · {live} live
+        <span className="min-w-0 truncate">
+          {allColls
+            ? `${formatCount(allColls.length - viewCount)} collection${allColls.length - viewCount === 1 ? "" : "s"}${viewCount ? ` · ${viewCount} view${viewCount === 1 ? "" : "s"}` : ""}`
+            : `${formatCount(databases.length)} database${databases.length === 1 ? "" : "s"}`}
+        </span>
+        {active && <Latency workspaceId={active.id} host={active.hostSummary} ssh={active.ssh} />}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              className="ico sm ml-auto"
+              className={cn("ico sm", !active && "ml-auto")}
               onClick={() => {
                 void loadDatabases();
                 if (selectedDb) void loadCollections(selectedDb);
@@ -506,10 +568,20 @@ export function Picker() {
         source={diffTarget?.coll ?? ""}
         onOpenChange={(o) => !o && setDiffTarget(null)}
       />
-      <RelationsDialog
-        open={!!relationsDb}
-        database={relationsDb ?? ""}
-        onOpenChange={(o) => !o && setRelationsDb(null)}
+      <TypeExportDialog
+        open={!!typesTarget}
+        database={typesTarget?.db ?? ""}
+        collection={typesTarget?.coll ?? ""}
+        onOpenChange={(o) => !o && setTypesTarget(null)}
+      />
+      <DbOverviewDialog
+        open={!!overviewDb}
+        database={overviewDb ?? ""}
+        onOpenChange={(o) => !o && setOverviewDb(null)}
+        onOpenCollection={(name) => {
+          if (overviewDb) openCollection(overviewDb, name);
+          setOverviewDb(null);
+        }}
       />
       <ClearCollectionDialog
         target={clearTarget}
