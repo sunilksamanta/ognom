@@ -187,6 +187,9 @@ export const useConnections = create<ConnectionsState>((set, get) => {
     },
 
     remove: async (id) => {
+      // Close its workspace first so nothing keeps pointing at a deleted profile.
+      const live = get().workspaces.find((w) => w.info.profileId === id);
+      if (live) await get().disconnectWorkspace(live.info.id);
       await api.deleteConnection(id);
       await get().refresh();
     },

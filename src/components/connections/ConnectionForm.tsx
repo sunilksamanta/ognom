@@ -1,9 +1,21 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, Loader2, XCircle } from "lucide-react";
+import { open as openFile } from "@tauri-apps/plugin-dialog";
+import { homeDir } from "@tauri-apps/api/path";
+import { CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, FolderOpen, Loader2, XCircle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, emptyFields, errMsg, type AccessMode, type ProfileInput, type ProfileSummary, type TestResult } from "@/lib/api";
+import {
+  api,
+  emptyFields,
+  emptySsh,
+  errMsg,
+  type AccessMode,
+  type ProfileInput,
+  type ProfileSummary,
+  type SshAuth,
+  type TestResult,
+} from "@/lib/api";
 import { useConnections } from "@/stores/connections";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +29,33 @@ export const PROFILE_COLORS = [
   "#F49AC1", // rose
   "#A2AEA8", // slate
 ];
+
+const SSH_AUTH: { id: SshAuth; label: string }[] = [
+  { id: "key", label: "Key file" },
+  { id: "password", label: "Password" },
+  { id: "agent", label: "SSH agent" },
+];
+
+/** Password input with a show/hide toggle, in the `.in` shell. */
+function SecretInput({ id, value, onChange, placeholder }: { id?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="in" style={{ padding: "0 4px 0 12px" }}>
+      <input
+        id={id}
+        type={show ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete="off"
+        className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
+      />
+      <button type="button" tabIndex={-1} className="ico sm" onClick={() => setShow((s) => !s)} aria-label="Toggle visibility">
+        {show ? <EyeOff /> : <Eye />}
+      </button>
+    </div>
+  );
+}
 
 const ACCESS: { id: AccessMode; label: string; hint: string; danger?: boolean }[] = [
   { id: "readwrite", label: "Read & write", hint: "full access, confirmations on destructive writes" },
@@ -50,14 +89,32 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
   const [kind, setKind] = useState<"fields" | "uri">(editing?.kind ?? "uri");
   const [uri, setUri] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [fields, setFields] = useState(() => ({ ...emptyFields(), ...(editing?.fields ?? {}) }));
   const [advanced, setAdvanced] = useState(false);
+  const [ssh, setSsh] = useState(() => ({ ...emptySsh(), ...(editing?.ssh ?? {}) }));
+  const [sshSecret, setSshSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState<"save" | "connect" | "adhoc" | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const srv = fields.scheme === "mongodb+srv";
+  const s = <K extends keyof typeof ssh>(key: K, value: (typeof ssh)[K]) => {
+    setSsh((prev) => ({ ...prev, [key]: value }));
+    setTestResult(null);
+  };
+  /** Stored SSH secret applies only while the auth method that needs it is unchanged. */
+  const sshSecretStored = !!editing?.hasSshSecret && editing.ssh.auth === ssh.auth;
+
+  const pickKeyFile = async () => {
+    const home = await homeDir().catch(() => undefined);
+    const picked = await openFile({
+      title: "Choose SSH private key",
+      defaultPath: home ? `${home}/.ssh` : undefined,
+      multiple: false,
+      directory: false,
+    }).catch(() => null);
+    if (typeof picked === "string") s("keyPath", picked);
+  };
   const f = <K extends keyof typeof fields>(key: K, value: (typeof fields)[K]) => {
     setFields((prev) => ({ ...prev, [key]: value }));
     setTestResult(null);
@@ -80,11 +137,19 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
     fields,
     uri: kind === "uri" ? uri.trim() || null : null,
     password: password || null,
+    ssh: { ...ssh, host: ssh.host.trim(), username: ssh.username.trim() },
+    sshSecret: ssh.enabled && ssh.auth !== "agent" ? sshSecret || null : null,
   });
 
   const validate = (): string | null => {
     if (kind === "uri" && !uri.trim() && !editing?.hasSecret) return "Paste a connection string first";
     if (kind === "fields" && !fields.host.trim()) return "Host is required";
+    if (ssh.enabled) {
+      if (!ssh.host.trim()) return "SSH host is required";
+      if (!ssh.username.trim()) return "SSH username is required";
+      if (ssh.auth === "key" && !ssh.keyPath?.trim()) return "Choose a private key file for the SSH tunnel";
+      if (ssh.auth === "password" && !sshSecret && !sshSecretStored) return "Enter the SSH password";
+    }
     return null;
   };
 
@@ -148,7 +213,11 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
           <Field
             label="Connection string"
             htmlFor="conn-uri"
-            hint="Stored fully encrypted, credentials included. Ognom parses mongodb:// and mongodb+srv:// URIs."
+            hint={
+              editing?.kind === "uri" && editing.hasSecret
+                ? `Saved: ${editing.hostSummary} (password hidden). Leave blank to keep it, or paste a new one to replace it.`
+                : "Stored fully encrypted, credentials included. Ognom parses mongodb:// and mongodb+srv:// URIs."
+            }
           >
             <input
               id="conn-uri"
@@ -178,19 +247,12 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
                 <input id="conn-user" className="in" placeholder="(none)" value={fields.username ?? ""} onChange={(e) => f("username", e.target.value || null)} autoCapitalize="off" autoCorrect="off" />
               </Field>
               <Field label="Password" htmlFor="conn-pass">
-                <div className="in" style={{ padding: "0 4px 0 12px" }}>
-                  <input
-                    id="conn-pass"
-                    type={showPassword ? "text" : "password"}
-                    placeholder={editing?.hasSecret ? "(unchanged)" : "(none)"}
-                    value={password}
-                    onChange={(e) => { setPassword(e.target.value); setTestResult(null); }}
-                    className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
-                  />
-                  <button type="button" tabIndex={-1} className="ico sm" onClick={() => setShowPassword((s) => !s)} aria-label="Toggle password">
-                    {showPassword ? <EyeOff /> : <Eye />}
-                  </button>
-                </div>
+                <SecretInput
+                  id="conn-pass"
+                  placeholder={editing?.hasSecret ? "(unchanged)" : "(none)"}
+                  value={password}
+                  onChange={(v) => { setPassword(v); setTestResult(null); }}
+                />
               </Field>
             </div>
 
@@ -286,6 +348,74 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
             )}
           </>
         )}
+
+        <div className="stack rounded-[var(--r)] border border-line bg-panel" style={{ padding: ssh.enabled ? 16 : "10px 16px" }}>
+          <label className="hstack text-[12.5px] font-medium text-text-2">
+            <Switch checked={ssh.enabled} onCheckedChange={(v) => s("enabled", v)} />
+            Connect through an SSH tunnel
+            <span className="ml-auto truncate text-[11px] font-normal text-text-3">
+              {ssh.enabled && ssh.host ? `via ${ssh.username ? `${ssh.username}@` : ""}${ssh.host}` : "bastion / jump host"}
+            </span>
+          </label>
+          {ssh.enabled && (
+            <>
+              <div className="two" style={{ gridTemplateColumns: "1fr 110px" }}>
+                <Field label="SSH host" htmlFor="ssh-host">
+                  <input id="ssh-host" className="in" placeholder="bastion.example.com" value={ssh.host} onChange={(e) => s("host", e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+                </Field>
+                <Field label="SSH port" htmlFor="ssh-port">
+                  <input id="ssh-port" className="in" inputMode="numeric" placeholder="22" value={ssh.port ?? ""} onChange={(e) => s("port", e.target.value ? parseInt(e.target.value, 10) || null : null)} />
+                </Field>
+              </div>
+              <div className="two">
+                <Field label="SSH username" htmlFor="ssh-user">
+                  <input id="ssh-user" className="in" placeholder="ubuntu" value={ssh.username} onChange={(e) => s("username", e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+                </Field>
+                <Field label="Authentication">
+                  <div className="seg no-select" style={{ height: 34 }}>
+                    {SSH_AUTH.map((a) => (
+                      <button key={a.id} type="button" className={cn("flex-1", ssh.auth === a.id && "on")} onClick={() => s("auth", a.id)}>
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+              {ssh.auth === "key" && (
+                <div className="two">
+                  <Field label="Private key" htmlFor="ssh-key">
+                    <div className="in" style={{ padding: "0 4px 0 12px" }}>
+                      <input
+                        id="ssh-key"
+                        className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
+                        placeholder="~/.ssh/id_ed25519"
+                        value={ssh.keyPath ?? ""}
+                        onChange={(e) => s("keyPath", e.target.value || null)}
+                        spellCheck={false}
+                      />
+                      <button type="button" className="ico sm" onClick={() => void pickKeyFile()} aria-label="Choose key file">
+                        <FolderOpen />
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label="Key passphrase" htmlFor="ssh-pass">
+                    <SecretInput id="ssh-pass" placeholder={sshSecretStored ? "(unchanged)" : "(none)"} value={sshSecret} onChange={(v) => { setSshSecret(v); setTestResult(null); }} />
+                  </Field>
+                </div>
+              )}
+              {ssh.auth === "password" && (
+                <Field label="SSH password" htmlFor="ssh-pass">
+                  <SecretInput id="ssh-pass" placeholder={sshSecretStored ? "(unchanged)" : "required"} value={sshSecret} onChange={(v) => { setSshSecret(v); setTestResult(null); }} />
+                </Field>
+              )}
+              <span className="hint">
+                {ssh.auth === "agent" && "Uses the keys loaded in your running ssh-agent. "}
+                Ognom forwards a local port through the bastion to the MongoDB host above and connects to it directly
+                (for a replica set, point it at the member you want). Host keys are checked against ~/.ssh/known_hosts.
+              </span>
+            </>
+          )}
+        </div>
 
         <div className="two">
           <Field label="Name" htmlFor="conn-name">

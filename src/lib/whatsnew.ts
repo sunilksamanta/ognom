@@ -19,6 +19,20 @@ const SEEN_KEY = "ognom-whats-new-seen";
 
 export const SLIDES: WhatsNewSlide[] = [
   {
+    version: "2.1.0",
+    title: "Types, tunnels and a clearer picture",
+    tagline: "From collection to code in a click.",
+    points: [
+      "Export types: turn a collection's schema into TypeScript interfaces or Zod schemas - Node.js (ObjectId, Date) or frontend (strings), extract nested objects into named interfaces, literal unions, copy or save as .ts",
+      "SSH tunnels: connect through a bastion with a key file, password or ssh-agent; host keys are checked against known_hosts",
+      "Database overview replaces the schema map: sizes, indexes, unindexed and empty collections, inferred references, CSV / JSON export",
+      "Editing a saved connection string now shows its host and username; switching to host and credentials keeps the password",
+      "Picker footer shows live server latency; document counts load in one go and survive workspace switches",
+      "A collection open in several tabs is numbered #1, #2, ... in the picker, header and title bar",
+      "Active connection is a solid tile on the rail; fixes for the delete confirmation, clipped dropdown labels and the JSON view's pinned first line",
+    ],
+  },
+  {
     version: "2.0.1",
     title: "Polish after the launch",
     tagline: "The console, sanded down.",

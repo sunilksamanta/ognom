@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { FileCode2, Loader2, RefreshCw, Search } from "lucide-react";
+import { TypeExportDialog } from "@/components/explorer/TypeExportDialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ export function SchemaPane({ tab, active }: SchemaPaneProps) {
   const [loading, setLoading] = useState(false);
   const [sampleSize, setSampleSize] = useState(1000);
   const [filter, setFilter] = useState("");
+  const [typesOpen, setTypesOpen] = useState(false);
 
   const load = async (size = sampleSize) => {
     setLoading(true);
@@ -84,7 +86,7 @@ export function SchemaPane({ tab, active }: SchemaPaneProps) {
               void load(Number(v));
             }}
           >
-            <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectTrigger className="h-8 w-auto min-w-[130px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -108,7 +110,12 @@ export function SchemaPane({ tab, active }: SchemaPaneProps) {
               <RefreshCw className="h-3.5 w-3.5" />
             )}
           </Button>
+          <button className="btn pri" style={{ height: 32 }} onClick={() => setTypesOpen(true)}>
+            <FileCode2 />
+            Export types
+          </button>
         </div>
+        <TypeExportDialog open={typesOpen} onOpenChange={setTypesOpen} database={tab.database} collection={tab.collection} />
 
         <div className="flex-1 overflow-y-auto px-[var(--pad)] py-3">
           {loading && !report ? (

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::crypto::Crypto;
 use crate::error::{AppError, AppResult};
+use crate::ssh::SshConfig;
 
 /// Percent-encode a URI component (RFC 3986 unreserved set passes through).
 pub fn pct_encode(s: &str) -> String {
@@ -81,6 +82,112 @@ pub fn repair_userinfo(uri: &str) -> Option<String> {
     }
     // Only worth returning if it actually changed something.
     (fixed != uri).then_some(fixed)
+}
+
+fn pct_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_hexdigit()
+            && bytes[i + 2].is_ascii_hexdigit()
+        {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Split `host[:port]` (IPv6 `[::1]:27017` included).
+fn split_host_port(h: &str) -> (String, Option<u16>) {
+    if let Some(rest) = h.strip_prefix('[') {
+        if let Some((host, tail)) = rest.split_once(']') {
+            let port = tail.strip_prefix(':').and_then(|p| p.parse().ok());
+            return (format!("[{host}]"), port);
+        }
+    }
+    match h.rsplit_once(':') {
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) && !port.is_empty() => {
+            (host.to_string(), port.parse().ok())
+        }
+        _ => (h.to_string(), None),
+    }
+}
+
+/// Parse a `mongodb://` / `mongodb+srv://` URI into structured fields plus the
+/// password it carried (if any). Unknown query options land in `extra_options`
+/// so a round trip through [`ConnFields::build_uri`] keeps them.
+pub fn fields_from_uri(uri: &str) -> Option<(ConnFields, Option<String>)> {
+    let uri = uri.trim();
+    let (scheme, rest) = uri.split_once("://")?;
+    if scheme != "mongodb" && scheme != "mongodb+srv" {
+        return None;
+    }
+    let (head, query) = match rest.split_once('?') {
+        Some((h, q)) => (h, Some(q)),
+        None => (rest, None),
+    };
+    // The host list never contains '@' or '/', so the last '@' ends the userinfo.
+    let (userinfo, hostpath) = match head.rfind('@') {
+        Some(at) => (Some(&head[..at]), &head[at + 1..]),
+        None => (None, head),
+    };
+    let (hosts, db) = match hostpath.split_once('/') {
+        Some((h, d)) => (h, Some(d)),
+        None => (hostpath, None),
+    };
+
+    let mut f = ConnFields { scheme: scheme.to_string(), ..Default::default() };
+    let mut password = None;
+    if let Some(ui) = userinfo {
+        let (user, pass) = match ui.split_once(':') {
+            Some((u, p)) => (u, Some(p)),
+            None => (ui, None),
+        };
+        f.username = Some(pct_decode(user)).filter(|u| !u.is_empty());
+        password = pass.map(pct_decode).filter(|p| !p.is_empty());
+    }
+    let mut host_list = hosts.split(',').map(str::trim).filter(|h| !h.is_empty());
+    let (host, port) = split_host_port(host_list.next().unwrap_or(""));
+    f.host = host;
+    f.port = if scheme == "mongodb" { port.or(Some(27017)) } else { None };
+    f.extra_hosts = host_list.map(str::to_string).collect();
+    f.default_database = db.map(pct_decode).filter(|d| !d.is_empty());
+
+    let mut extra: Vec<&str> = Vec::new();
+    for pair in query.unwrap_or("").split('&').filter(|p| !p.is_empty()) {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        let dv = pct_decode(v);
+        let truthy = v.eq_ignore_ascii_case("true");
+        match k.to_ascii_lowercase().as_str() {
+            "authsource" => f.auth_source = Some(dv),
+            "authmechanism" => f.auth_mechanism = Some(dv),
+            "replicaset" => f.replica_set = Some(dv),
+            "directconnection" => f.direct_connection = truthy,
+            "readpreference" => f.read_preference = Some(dv),
+            "tls" | "ssl" => f.tls_enabled = truthy,
+            "tlsallowinvalidcertificates" | "tlsinsecure" => f.tls_insecure = truthy,
+            "tlsallowinvalidhostnames" => {}
+            "tlscafile" => f.tls_ca_file = Some(dv),
+            "tlscertificatekeyfile" => f.tls_cert_key_file = Some(dv),
+            "connecttimeoutms" => f.connect_timeout_ms = v.parse().ok(),
+            "serverselectiontimeoutms" => f.server_selection_timeout_ms = v.parse().ok(),
+            "maxpoolsize" => f.max_pool_size = v.parse().ok(),
+            _ => extra.push(pair),
+        }
+    }
+    if !extra.is_empty() {
+        f.extra_options = Some(extra.join("&"));
+    }
+    Some((f, password))
 }
 
 /// Structured connection fields. Everything here is non-secret; the password
@@ -250,6 +357,12 @@ pub struct StoredProfile {
     pub uri_summary: Option<String>,
     /// Encrypted secret: the password (fields) or the full URI (uri).
     pub secret_enc: Option<String>,
+    /// Optional SSH tunnel (bastion) the connection goes through.
+    #[serde(default)]
+    pub ssh: SshConfig,
+    /// Encrypted SSH password or private-key passphrase.
+    #[serde(default)]
+    pub ssh_secret_enc: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
 }
@@ -269,6 +382,11 @@ pub struct ProfileInput {
     pub uri: Option<String>,
     /// Plaintext password; None on edit means "keep the stored one".
     pub password: Option<String>,
+    #[serde(default)]
+    pub ssh: SshConfig,
+    /// Plaintext SSH password / key passphrase; None on edit keeps the stored one.
+    #[serde(default)]
+    pub ssh_secret: Option<String>,
 }
 
 /// What the UI gets back. Never contains secrets.
@@ -285,6 +403,8 @@ pub struct ProfileSummary {
     pub tls: bool,
     pub has_secret: bool,
     pub fields: ConnFields,
+    pub ssh: SshConfig,
+    pub has_ssh_secret: bool,
     pub last_used_at: Option<String>,
 }
 
@@ -321,6 +441,17 @@ impl StoredProfile {
                 (s, srv, srv)
             }
         };
+        // URI profiles: derive the fields from the (password-less) summary so
+        // the "Host and credentials" tab shows the real host and username.
+        let fields = match self.kind {
+            ProfileKind::Fields => self.fields.clone(),
+            ProfileKind::Uri => self
+                .uri_summary
+                .as_deref()
+                .and_then(fields_from_uri)
+                .map(|(f, _)| f)
+                .unwrap_or_else(|| self.fields.clone()),
+        };
         ProfileSummary {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -331,7 +462,9 @@ impl StoredProfile {
             srv,
             tls,
             has_secret: self.secret_enc.is_some(),
-            fields: self.fields.clone(),
+            fields,
+            ssh: self.ssh.clone(),
+            has_ssh_secret: self.ssh_secret_enc.is_some(),
             last_used_at: self.last_used_at.clone(),
         }
     }
@@ -397,6 +530,7 @@ impl ProfileStore {
         if !ACCESS_MODES.contains(&input.access.as_str()) {
             return Err(AppError::Other(format!("unknown access mode '{}'", input.access)));
         }
+        input.ssh.validate()?;
         let existing = input
             .id
             .as_ref()
@@ -424,7 +558,22 @@ impl ProfileStore {
                 if input.fields.host.trim().is_empty() {
                     return Err(AppError::Other("host is required".into()));
                 }
-                (input.password.clone().filter(|p| !p.is_empty()), None)
+                let typed = input.password.clone().filter(|p| !p.is_empty());
+                // Switching a saved URI profile to host/credentials without
+                // retyping the password: carry over the one inside the old URI.
+                let carried = match (&typed, existing) {
+                    (None, Some(idx)) => {
+                        let old = &self.profiles[idx];
+                        match (&old.kind, &old.secret_enc) {
+                            (ProfileKind::Uri, Some(enc)) => fields_from_uri(&crypto.decrypt(enc)?)
+                                .filter(|(f, _)| f.username == input.fields.username)
+                                .and_then(|(_, p)| p),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                (typed.or(carried), None)
             }
         };
 
@@ -442,6 +591,27 @@ impl ProfileStore {
             (None, None) => None,
         };
 
+        // SSH secret: agent auth and disabled tunnels keep none; otherwise a
+        // newly typed one replaces the stored one, and blank keeps it.
+        let ssh_needs_secret = input.ssh.is_active() && input.ssh.auth != "agent";
+        let ssh_secret_enc = match (input.ssh_secret.as_deref().filter(|s| !s.is_empty()), existing) {
+            _ if !ssh_needs_secret => None,
+            (Some(plain), _) => Some(crypto.encrypt(plain)?),
+            (None, Some(idx)) => self.profiles[idx].ssh_secret_enc.clone(),
+            (None, None) => None,
+        };
+
+        // URI profiles keep their fields in step with the URI so exports and
+        // the form's host/credentials view stay truthful.
+        let fields = match input.kind {
+            ProfileKind::Fields => input.fields.clone(),
+            ProfileKind::Uri => uri_summary
+                .as_deref()
+                .and_then(fields_from_uri)
+                .map(|(f, _)| f)
+                .unwrap_or_default(),
+        };
+
         let now = chrono::Utc::now().to_rfc3339();
         let profile = StoredProfile {
             id: input.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
@@ -449,9 +619,11 @@ impl ProfileStore {
             color: input.color.clone(),
             access: input.access.clone(),
             kind: input.kind.clone(),
-            fields: input.fields.clone(),
+            fields,
             uri_summary,
             secret_enc,
+            ssh: input.ssh.clone(),
+            ssh_secret_enc,
             created_at: existing
                 .map(|i| self.profiles[i].created_at.clone())
                 .unwrap_or_else(|| now.clone()),
@@ -512,6 +684,10 @@ impl ProfileStore {
                 (Some(enc), true) => Some(crypto.decrypt(enc)?),
                 _ => None,
             };
+            let ssh_secret = match (&p.ssh_secret_enc, include_secrets) {
+                (Some(enc), true) => Some(crypto.decrypt(enc)?),
+                _ => None,
+            };
             out.push(crate::portable::ExportConn {
                 name: p.name.clone(),
                 color: p.color.clone(),
@@ -520,6 +696,8 @@ impl ProfileStore {
                 fields: p.fields.clone(),
                 uri_summary: p.uri_summary.clone(),
                 secret,
+                ssh: p.ssh.clone(),
+                ssh_secret,
             });
         }
         Ok(out)
@@ -536,6 +714,10 @@ impl ProfileStore {
         let mut needs_password = 0u32;
         for c in conns {
             let secret_enc = match &c.secret {
+                Some(s) if !s.is_empty() => Some(crypto.encrypt(s)?),
+                _ => None,
+            };
+            let ssh_secret_enc = match &c.ssh_secret {
                 Some(s) if !s.is_empty() => Some(crypto.encrypt(s)?),
                 _ => None,
             };
@@ -567,6 +749,8 @@ impl ProfileStore {
                 fields: c.fields,
                 uri_summary: c.uri_summary,
                 secret_enc,
+                ssh: c.ssh,
+                ssh_secret_enc,
                 created_at: now,
                 last_used_at: None,
             });
@@ -595,6 +779,21 @@ impl ProfileStore {
                 p.fields.build_uri(password.as_deref())
             }
         }
+    }
+}
+
+impl ProfileStore {
+    /// The SSH tunnel for a saved profile (with its decrypted secret), if any.
+    pub fn ssh_for(&self, id: &str, crypto: &Crypto) -> AppResult<Option<(SshConfig, Option<String>)>> {
+        let p = self.get(id)?;
+        if !p.ssh.is_active() {
+            return Ok(None);
+        }
+        let secret = match &p.ssh_secret_enc {
+            Some(enc) => Some(crypto.decrypt(enc)?),
+            None => None,
+        };
+        Ok(Some((p.ssh.clone(), secret)))
     }
 }
 
@@ -698,6 +897,34 @@ mod tests {
     fn repair_preserves_existing_encoding() {
         // already-encoded %40 must not become %2540
         assert!(repair_userinfo("mongodb://admin:p%40ss@host/db").is_none());
+    }
+
+    #[test]
+    fn parse_uri_roundtrip() {
+        let (f, pass) = fields_from_uri(
+            "mongodb://skilldriftApp:p%40ss@mongo1.example.com:27017,mongo2.example.com:27017/app?authSource=admin&replicaSet=rs0&retryWrites=true",
+        )
+        .unwrap();
+        assert_eq!(f.username.as_deref(), Some("skilldriftApp"));
+        assert_eq!(pass.as_deref(), Some("p@ss"));
+        assert_eq!(f.host, "mongo1.example.com");
+        assert_eq!(f.port, Some(27017));
+        assert_eq!(f.extra_hosts, vec!["mongo2.example.com:27017".to_string()]);
+        assert_eq!(f.default_database.as_deref(), Some("app"));
+        assert_eq!(f.auth_source.as_deref(), Some("admin"));
+        assert_eq!(f.replica_set.as_deref(), Some("rs0"));
+        assert_eq!(f.extra_options.as_deref(), Some("retryWrites=true"));
+    }
+
+    #[test]
+    fn parse_srv_summary() {
+        let (f, pass) = fields_from_uri("mongodb+srv://sunil_db_user@skilldrift.abc.mongodb.net/stage").unwrap();
+        assert_eq!(f.scheme, "mongodb+srv");
+        assert_eq!(f.username.as_deref(), Some("sunil_db_user"));
+        assert_eq!(f.host, "skilldrift.abc.mongodb.net");
+        assert_eq!(f.port, None);
+        assert!(pass.is_none());
+        assert!(fields_from_uri("postgres://x").is_none());
     }
 
     #[test]

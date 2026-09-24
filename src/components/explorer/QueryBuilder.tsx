@@ -221,7 +221,7 @@ export function QueryBuilder({
                 spellCheck={false}
               />
               <Select value={row.op} onValueChange={(v) => update(row.id, { op: v as Op })}>
-                <SelectTrigger className="h-8 w-[140px] text-xs">
+                <SelectTrigger className="h-8 w-[170px] shrink-0 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

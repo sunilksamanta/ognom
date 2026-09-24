@@ -491,7 +491,7 @@ function CreateForm({
                   spellCheck={false}
                 />
                 <Select value={k.type} onValueChange={(v) => setKeys((ks) => ks.map((x) => (x.id === k.id ? { ...x, type: v as KeyType } : x)))}>
-                  <SelectTrigger className="w-[160px]">
+                  <SelectTrigger className="w-[180px] shrink-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

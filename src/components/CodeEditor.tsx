@@ -116,6 +116,8 @@ export function CodeEditor({
           glyphMargin: false,
           renderLineHighlight: "none",
           scrollBeyondLastLine: false,
+          // Pinned enclosing-scope header overlaps the first visible lines.
+          stickyScroll: { enabled: false },
           automaticLayout: true,
           tabSize: 2,
           wordWrap: "on",
