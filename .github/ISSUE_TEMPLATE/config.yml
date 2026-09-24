@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/sunilksamanta/ognom/discussions/categories/q-a
+    about: Ask how to do something, or get help with a connection.
+  - name: Ideas and discussion
+    url: https://github.com/sunilksamanta/ognom/discussions/categories/ideas
+    about: Talk through an idea before it becomes a feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/sunilksamanta/ognom/security/advisories/new
+    about: Please report security problems privately, not as an issue.

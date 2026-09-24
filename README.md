@@ -12,11 +12,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/sunilksamanta/ognom/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/sunilksamanta/ognom/ci.yml?branch=main&style=flat-square&label=CI"></a>
   <a href="https://github.com/sunilksamanta/ognom/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sunilksamanta/ognom?style=flat-square&label=release&color=00ED64"></a>
   <a href="https://github.com/sunilksamanta/ognom/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/sunilksamanta/ognom/total?style=flat-square&color=0E9F6E"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-27272a?style=flat-square">
   <img alt="Built with Tauri and Rust" src="https://img.shields.io/badge/built%20with-Tauri%202%20%2B%20Rust-orange?style=flat-square">
+  <a href="https://github.com/sunilksamanta/ognom/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sunilksamanta/ognom?style=flat-square&color=E9B44C"></a>
 </p>
 
 <p align="center">
@@ -27,7 +29,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ognom.dev"><img src="https://ognom.dev/ognom-og-image.png" alt="Ognom, the MongoDB client" width="820" /></a>
+  <img src="docs/screenshots/table-view.png" alt="Ognom: the orders collection in the table view, with the query dock showing matched count, timing and the index used" width="900" />
 </p>
 
 ---
@@ -35,6 +37,7 @@
 ## Contents
 
 - [Why Ognom](#why-ognom)
+- [Screenshots](#screenshots)
 - [What's new in 2.1](#whats-new-in-21)
 - [Features](#features)
 - [Production, read-only and backups](#production-read-only-and-backups)
@@ -57,6 +60,20 @@
 - **Knows what production is.** A connection marked Production opens read-only. Writes are blocked in the backend until you switch to edit mode, and Ognom asks first.
 - **A query never hides its cost.** Matched count, timing and the winning plan sit right above the query box.
 - **From data to code.** Sample a collection and get TypeScript interfaces or Zod schemas you can paste straight into your app.
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/interface-builder.png" alt="Interface builder: the profiles collection as TypeScript interfaces, with Session and TrendSummary extracted" /><br/><sub><b>Interface builder.</b> A sampled collection as TypeScript or Zod, nested objects split into their own interfaces.</sub></td>
+    <td width="50%"><img src="docs/screenshots/database-overview.png" alt="Database overview: sizes and index stats for every collection, with flags" /><br/><sub><b>Database overview.</b> Sizes and indexes for every collection, with what needs attention flagged.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/document-drawer.png" alt="Document drawer: an orders document open in the JSON tab next to the table" /><br/><sub><b>Document drawer.</b> Edit a document field by field or as JSON, and check the diff before saving.</sub></td>
+  </tr>
+</table>
 
 ---
 
@@ -256,6 +273,8 @@ sudo dnf install ./Ognom-x.y.z-1.x86_64.rpm
 - The webview runs under a strict Content Security Policy with no remote content. Fonts, the editor and all assets are bundled, so the app works offline.
 - Ognom talks only to your MongoDB servers, your SSH hosts and GitHub (for update checks). No telemetry, no analytics, no account.
 
+Found a security problem? Please report it privately; see [SECURITY.md](SECURITY.md).
+
 ---
 
 ## Build from source
@@ -308,7 +327,12 @@ More docs:
 
 ## Contributing
 
-Bug reports and feature requests are welcome in [Issues](https://github.com/sunilksamanta/ognom/issues). For code changes, open an issue first for anything larger than a fix, keep pull requests focused, and run both test suites before submitting.
+- **Bugs:** open an [issue](https://github.com/sunilksamanta/ognom/issues/new/choose) using the bug template.
+- **Questions and ideas:** use [Discussions](https://github.com/sunilksamanta/ognom/discussions).
+- **Code:** read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, guidelines and the checks to run.
+- **Security:** report privately, as described in [SECURITY.md](SECURITY.md).
+
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 

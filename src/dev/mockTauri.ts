@@ -4,9 +4,12 @@
  * stand-in. Never bundled into the app: main.tsx imports it only when
  * `import.meta.env.DEV` and no real `__TAURI_INTERNALS__` exists.
  */
+import pkg from "../../package.json";
+
 type Doc = Record<string, unknown>;
 
-const oid = (n: number) => ({ $oid: (0x6712a4f0c9e1b3d84a02f000 + n).toString(16).padStart(24, "0") });
+// Built as a string: adding to a 24-hex-digit number loses precision and gives every doc the same id.
+const oid = (n: number) => ({ $oid: `6712a4f0c9e1b3d84a02${n.toString(16).padStart(4, "0")}` });
 const date = (daysAgo: number, h = 9) => ({
   $date: new Date(Date.UTC(2026, 7, 14 - daysAgo, h, 12, 4)).toISOString(),
 });
@@ -151,7 +154,7 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
   await sleep(cmd.startsWith("plugin:") ? 0 : 60);
   switch (cmd) {
     case "plugin:app|version":
-      return "2.0.0";
+      return pkg.version;
     case "plugin:event|listen":
       return ++seq;
     case "plugin:event|unlisten":

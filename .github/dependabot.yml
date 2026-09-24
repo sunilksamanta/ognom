@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # The Tauri CLI refuses to build when JS and Rust Tauri packages drift apart,
+      # so keep the JS side moving together.
+      tauri:
+        patterns: ["@tauri-apps/*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns: ["@tauri-apps/*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns: ["tauri", "tauri-*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # time 0.3.48+ breaks tauri-utils / cookie / mongodb (E0119); see Cargo.toml.
+      - dependency-name: "time"
+        versions: [">=0.3.48"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
