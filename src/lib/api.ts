@@ -563,6 +563,9 @@ export const api = {
   }) => invoke<ExplainSummary>("explain_query", args),
   analyzeSchema: (database: string, collection: string, sampleSize?: number) =>
     invoke<SchemaReport>("analyze_schema", { database, collection, sampleSize }),
+  /** Nested shape for the TypeScript / Zod exporter. */
+  inferSchemaTree: (database: string, collection: string, sampleSize?: number) =>
+    invoke<import("@/lib/tsgen").SchemaTree>("infer_schema_tree", { database, collection, sampleSize }),
   collectionFields: (database: string, collection: string, limit?: number) =>
     invoke<string[]>("collection_fields", { database, collection, limit }),
   exportCollection: (args: {

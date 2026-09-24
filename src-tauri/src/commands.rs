@@ -2479,6 +2479,30 @@ pub async fn analyze_schema(
     Ok(json!({ "sampled": sampled, "fields": result }))
 }
 
+/// Nested shape of a collection's documents from a random sample, for the
+/// TypeScript / Zod exporter (see `typetree.rs`).
+#[tauri::command]
+pub async fn infer_schema_tree(
+    database: String,
+    collection: String,
+    sample_size: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<Value> {
+    let client = current_client(&state).await?;
+    let coll = client.database(&database).collection::<Document>(&collection);
+    let sample_size = sample_size.unwrap_or(1000).clamp(10, 10_000);
+    let mut cursor = coll
+        .aggregate(vec![doc! { "$sample": { "size": sample_size } }])
+        .await?;
+    let mut root = crate::typetree::Shape::new();
+    let mut sampled = 0i64;
+    while let Some(d) = cursor.try_next().await? {
+        root.add_doc(&d);
+        sampled += 1;
+    }
+    Ok(json!({ "sampled": sampled, "root": root.to_json() }))
+}
+
 // ---------------------------------------------------------------------------
 // export / import
 // ---------------------------------------------------------------------------

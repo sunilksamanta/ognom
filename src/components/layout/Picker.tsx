@@ -10,6 +10,7 @@ import {
   GitCompare,
   Loader2,
   BarChart3,
+  FileCode2,
   Pin,
   PinOff,
   RefreshCw,
@@ -41,6 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { CopyCollectionDialog } from "@/components/explorer/CopyCollectionDialog";
 import { DiffCollectionDialog } from "@/components/explorer/DiffCollectionDialog";
 import { DbOverviewDialog } from "@/components/explorer/DbOverviewDialog";
+import { TypeExportDialog } from "@/components/explorer/TypeExportDialog";
 import { DuplicateCollectionDialog } from "@/components/explorer/DuplicateCollectionDialog";
 import { DropCollectionDialog, ClearCollectionDialog } from "@/components/explorer/CollectionDangerDialogs";
 import { tabNumber, useExplorer } from "@/stores/explorer";
@@ -163,6 +165,7 @@ export function Picker() {
   const [copyTarget, setCopyTarget] = useState<Target | null>(null);
   const [diffTarget, setDiffTarget] = useState<Target | null>(null);
   const [overviewDb, setOverviewDb] = useState<string | null>(null);
+  const [typesTarget, setTypesTarget] = useState<Target | null>(null);
   const [clearTarget, setClearTarget] = useState<Target | null>(null);
   const [dropTarget, setDropTarget] = useState<Target | null>(null);
 
@@ -249,6 +252,9 @@ export function Picker() {
       </ContextMenuItem>
       <ContextMenuItem onSelect={() => setDiffTarget({ db, coll })}>
         <GitCompare /> Diff with
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={() => setTypesTarget({ db, coll })}>
+        <FileCode2 /> Export TypeScript types
       </ContextMenuItem>
       {kind !== "view" && (
         <>
@@ -561,6 +567,12 @@ export function Picker() {
         database={diffTarget?.db ?? ""}
         source={diffTarget?.coll ?? ""}
         onOpenChange={(o) => !o && setDiffTarget(null)}
+      />
+      <TypeExportDialog
+        open={!!typesTarget}
+        database={typesTarget?.db ?? ""}
+        collection={typesTarget?.coll ?? ""}
+        onOpenChange={(o) => !o && setTypesTarget(null)}
       />
       <DbOverviewDialog
         open={!!overviewDb}

@@ -37,8 +37,77 @@ const users: Doc[] = names.map((n, i) => ({
   signupAt: date(30 + i),
 }));
 
+const risks = ["RED", "AMBER", "GREEN"];
+const patientProfiles: Doc[] = Array.from({ length: 40 }, (_, i) => ({
+  _id: oid(0x500 + i),
+  userId: oid(0x300 + (i % 12)),
+  email: `user${i}@example.com`,
+  gender: i % 2 ? "M" : "F",
+  dateOfBirth: date(9000 + i * 40),
+  riskLevel: risks[i % 3],
+  trend: ["STABLE", "IMPROVING", "DECLINING"][i % 3],
+  totalScore: (i * 7) % 30,
+  ...(i % 4 ? { assessmentDates: { phase1: date(i), phase2: i % 3 ? null : date(i + 1) } } : {}),
+  engagementScore: i % 5 === 0 ? 0.5 : i % 10,
+  lastAppointment: i % 6 ? oid(0x900 + i) : null,
+  isActive: i % 7 !== 0,
+  trendSummary: {
+    who5: { score: i % 25, trend: "STABLE" },
+    gad2: { score: i % 6, trend: risks[i % 3] === "RED" ? "UP" : "STABLE" },
+  },
+  sessions: Array.from({ length: i % 3 }, (_, j) => ({ at: date(j), durationMin: 30 + j * 15, therapistId: oid(0x700 + j), notes: j ? "follow-up" : null })),
+  tags: i % 2 ? ["priority"] : [],
+  createdAt: date(i % 20),
+  updatedAt: date(i % 5),
+}));
+
+/** Nested shape inference mirroring src-tauri/src/typetree.rs, over relaxed extJSON. */
+type Shape = { count: number; kinds: Record<string, number>; objects: number; fields: { name: string; present: number; shape: Shape }[]; capped: boolean; items: Shape | null; values: [string, number][] | null; examples: unknown[]; _vals?: Map<string, number> | null };
+const newShape = (): Shape => ({ count: 0, kinds: {}, objects: 0, fields: [], capped: false, items: null, values: null, examples: [], _vals: new Map() });
+function kindOfJson(v: unknown): string {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  if (typeof v === "string") return "string";
+  if (typeof v === "boolean") return "bool";
+  if (typeof v === "number") return Number.isInteger(v) ? "int" : "double";
+  const o = v as Doc;
+  if ("$oid" in o) return "objectId";
+  if ("$date" in o) return "date";
+  if ("$numberDecimal" in o) return "decimal";
+  if ("$numberLong" in o) return "long";
+  return "object";
+}
+function addValue(s: Shape, v: unknown) {
+  s.count++;
+  const k = kindOfJson(v);
+  s.kinds[k] = (s.kinds[k] ?? 0) + 1;
+  if (k === "object") addFields(s, v as Doc);
+  else if (k === "array") {
+    s.items ??= newShape();
+    for (const e of v as unknown[]) addValue(s.items, e);
+  } else if (k === "string" && s._vals) {
+    s._vals.set(v as string, (s._vals.get(v as string) ?? 0) + 1);
+    if (s._vals.size > 24 || (v as string).length > 64) s._vals = null;
+  }
+  if (s.examples.length < 2 && k !== "object" && k !== "array" && !s.examples.includes(v)) s.examples.push(v);
+}
+function addFields(s: Shape, d: Doc) {
+  s.objects++;
+  for (const [k, v] of Object.entries(d)) {
+    let f = s.fields.find((x) => x.name === k);
+    if (!f) s.fields.push((f = { name: k, present: 0, shape: newShape() }));
+    f.present++;
+    addValue(f.shape, v);
+  }
+}
+function finish(s: Shape): Shape {
+  const onlyStrings = Object.keys(s.kinds).every((k) => k === "string" || k === "null");
+  const values = s._vals && s.kinds.string && onlyStrings ? [...s._vals.entries()].sort((a, b) => b[1] - a[1]) : null;
+  return { ...s, values, _vals: undefined, items: s.items && finish(s.items), fields: s.fields.map((f) => ({ ...f, shape: finish(f.shape) })) };
+}
+
 const store: Record<string, Record<string, Doc[]>> = {
-  api: { orders, users, payments: orders.slice(0, 20), products: users.slice(0, 5), sessions: [], webhooks: [], audit_log: [] },
+  api: { orders, users, profiles: patientProfiles, payments: orders.slice(0, 20), products: users.slice(0, 5), sessions: [], webhooks: [], audit_log: [] },
   shop: { customers: users, carts: [] },
   admin: {},
 };
@@ -149,6 +218,14 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
         { path: "items", present: 60, coverage: 1, types: [{ type: "array", count: 60 }], examples: [] },
         { path: "createdAt", present: 58, coverage: 0.97, types: [{ type: "date", count: 58 }], examples: [] },
       ] };
+    case "infer_schema_tree": {
+      const docs = store[args.database as string]?.[args.collection as string] ?? [];
+      const root = newShape();
+      root.count = docs.length;
+      root.kinds = docs.length ? { object: docs.length } : {};
+      for (const d of docs) addFields(root, d);
+      return { sampled: docs.length, root: finish(root) };
+    }
     case "collection_fields":
       return ["_id", "customer.name", "customer.tier", "status", "total", "items", "createdAt"];
     case "aggregate_collection":

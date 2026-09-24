@@ -5,6 +5,7 @@ mod portable;
 mod profiles;
 mod shell;
 mod ssh;
+mod typetree;
 
 use commands::AppState;
 use tauri::Manager;
@@ -131,6 +132,7 @@ pub fn run() {
             commands::drop_index,
             commands::collection_stats,
             commands::collection_counts,
+            commands::infer_schema_tree,
             commands::explain_query,
             commands::collection_fields,
             commands::analyze_schema,
