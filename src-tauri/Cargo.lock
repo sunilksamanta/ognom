@@ -3578,7 +3578,7 @@ dependencies = [
 
 [[package]]
 name = "ognom"
-version = "2.0.1"
+version = "2.1.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "argon2 0.5.3",
