@@ -84,7 +84,7 @@ export function SchemaPane({ tab, active }: SchemaPaneProps) {
               void load(Number(v));
             }}
           >
-            <SelectTrigger className="h-8 w-[130px] text-xs">
+            <SelectTrigger className="h-8 w-auto min-w-[130px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -107,6 +107,7 @@ export function QueryInput({
             overviewRulerBorder: false,
             renderLineHighlight: "none",
             scrollBeyondLastLine: false,
+            stickyScroll: { enabled: false },
             scrollBeyondLastColumn: 2,
             fixedOverflowWidgets: true,
             contextmenu: false,

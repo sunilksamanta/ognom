@@ -31,8 +31,10 @@ export function initials(name: string): string {
 /**
  * The rail: connection tiles first (saved profiles + any ad-hoc workspaces),
  * then the sections, then appearance / settings pinned to the bottom.
- * Tiles: colour tag top-left, live dot bottom-right, dashed border = read-only,
- * red border = production.
+ * Tiles: the active workspace is a solid accent (red for production) tile
+ * with a bar on the left; other open workspaces keep a green dot; saved but
+ * disconnected profiles are dimmed. Colour tag top-left, dashed border =
+ * read-only, red border = production.
  */
 export function Rail() {
   const profiles = useConnections((s) => s.profiles);
@@ -60,7 +62,7 @@ export function Rail() {
     const busy = p ? connectingId === p.id : false;
     const readOnly = ws ? ws.readOnly : access !== "readwrite";
     const prod = access === "production";
-    const label = `${name}${prod ? " · production" : access === "readonly" ? " · read-only" : ""}${live ? "" : " · disconnected"}`;
+    const label = `${name}${prod ? " · production" : access === "readonly" ? " · read-only" : ""}${on ? " · active" : live ? " · open in background" : " · disconnected"}`;
     const onClick = () => {
       if (ws) void switchTo(ws.info.id);
       else if (p) void connect(p.id);

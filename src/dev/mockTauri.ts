@@ -44,9 +44,9 @@ const store: Record<string, Record<string, Doc[]>> = {
 };
 
 const profiles = [
-  { id: "p1", name: "TEST", color: "#00ED64", access: "readwrite", kind: "fields", hostSummary: "localhost:27017", srv: false, tls: false, hasSecret: false, fields: { scheme: "mongodb", host: "localhost", port: 27017, extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: new Date().toISOString() },
-  { id: "p2", name: "staging", color: "#7FE1FF", access: "readonly", kind: "uri", hostSummary: "mongodb+srv://staging.mongodb.net", srv: true, tls: true, hasSecret: true, fields: { scheme: "mongodb+srv", host: "", extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: null },
-  { id: "p3", name: "prod", color: "#F0705F", access: "production", kind: "uri", hostSummary: "mongodb+srv://prod.mongodb.net", srv: true, tls: true, hasSecret: true, fields: { scheme: "mongodb+srv", host: "", extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: null },
+  { id: "p1", name: "TEST", color: "#00ED64", access: "readwrite", kind: "fields", hostSummary: "localhost:27017", srv: false, tls: false, hasSecret: false, ssh: { enabled: false, host: "", port: 22, username: "", auth: "key", keyPath: null }, hasSshSecret: false, fields: { scheme: "mongodb", host: "localhost", port: 27017, extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: new Date().toISOString() },
+  { id: "p2", name: "staging", color: "#7FE1FF", access: "readonly", kind: "uri", hostSummary: "mongodb+srv://ops@staging.mongodb.net/app", srv: true, tls: true, hasSecret: true, ssh: { enabled: false, host: "", port: 22, username: "", auth: "key", keyPath: null }, hasSshSecret: false, fields: { scheme: "mongodb+srv", host: "staging.mongodb.net", username: "ops", defaultDatabase: "app", extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: null },
+  { id: "p3", name: "prod", color: "#F0705F", access: "production", kind: "uri", hostSummary: "mongodb://app@10.0.3.12:27017", srv: false, tls: false, hasSecret: true, ssh: { enabled: true, host: "bastion.example.com", port: 22, username: "ubuntu", auth: "key", keyPath: "~/.ssh/id_ed25519" }, hasSshSecret: false, fields: { scheme: "mongodb", host: "10.0.3.12", port: 27017, username: "app", extraHosts: [], directConnection: false, tlsEnabled: false, tlsInsecure: false }, lastUsedAt: null },
 ];
 
 const info = (p: (typeof profiles)[number]) => ({
@@ -59,6 +59,7 @@ const info = (p: (typeof profiles)[number]) => ({
   latencyMs: 12,
   color: p.color,
   access: p.access,
+  ssh: p.ssh.enabled ? `${p.ssh.username}@${p.ssh.host}` : null,
 });
 
 let seq = 0;
@@ -116,6 +117,8 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
       return Object.keys(store).map((name) => ({ name, sizeOnDisk: name === "api" ? 44_700_000 : 1_200_000, empty: false }));
     case "list_collections":
       return Object.keys(store[args.database as string] ?? {}).map((name) => ({ name, kind: "collection" }));
+    case "collection_counts":
+      return Object.fromEntries(Object.entries(store[args.database as string] ?? {}).map(([n, d]) => [n, d.length]));
     case "collection_stats": {
       const docs = store[args.database as string]?.[args.collection as string] ?? [];
       return { count: docs.length, size: docs.length * 4400, avgObjSize: 4400, storageSize: docs.length * 5100, totalIndexSize: 49_152, nindexes: 2 };
@@ -176,8 +179,30 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
       return { was: 0, slowms: 100 };
     case "profiler_entries":
       return [];
-    case "db_relations":
-      return { nodes: [], edges: [], truncated: false };
+    case "ping_workspace":
+      return 8 + Math.round(Math.random() * 30);
+    case "save_text_file":
+      return null;
+    case "db_overview": {
+      const colls = store[args.database as string] ?? {};
+      return {
+        database: args.database,
+        refsSkipped: 0,
+        collections: Object.entries(colls).map(([name, docs], i) => ({
+          name,
+          kind: "collection",
+          count: name === "audit_log" ? 184_220 : docs.length,
+          size: docs.length * 4400,
+          avgObjSize: docs.length ? 4400 : null,
+          storageSize: docs.length * 5100,
+          totalIndexSize: name === "payments" ? 400_000 : 36_864 * (i + 1),
+          nindexes: name === "audit_log" ? 1 : 2,
+          capped: name === "sessions",
+          validated: name === "users",
+          refs: name === "orders" ? [{ field: "userId", to: "users" }] : name === "payments" ? [{ field: "orderId", to: "orders" }] : [],
+        })),
+      };
+    }
     default:
       console.warn("[mockTauri] unhandled", cmd, args);
       return null;

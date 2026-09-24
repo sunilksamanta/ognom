@@ -4,6 +4,7 @@ mod error;
 mod portable;
 mod profiles;
 mod shell;
+mod ssh;
 
 use commands::AppState;
 use tauri::Manager;
@@ -106,7 +107,9 @@ pub fn run() {
             commands::aggregate_stage_stats,
             commands::bulk_update,
             commands::bulk_delete,
-            commands::db_relations,
+            commands::db_overview,
+            commands::ping_workspace,
+            commands::save_text_file,
             commands::current_ops,
             commands::kill_op,
             commands::profiler_status,
@@ -127,6 +130,7 @@ pub fn run() {
             commands::create_index,
             commands::drop_index,
             commands::collection_stats,
+            commands::collection_counts,
             commands::explain_query,
             commands::collection_fields,
             commands::analyze_schema,

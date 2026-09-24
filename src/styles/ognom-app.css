@@ -49,16 +49,18 @@ button{font-family:inherit;color:inherit}
 .conns::-webkit-scrollbar{display:none}
 .cx{width:36px;height:36px;border-radius:var(--r);display:grid;place-items:center;font:600 12px/1 var(--mono);color:var(--text-2);background:var(--panel-2);border:1px solid var(--line);cursor:pointer;position:relative;transition:.15s var(--ease);flex:none;padding:0}
 .cx:hover{background:var(--hover);color:var(--text)}
-.cx.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.cx.on::before{content:"";position:absolute;left:-13px;top:8px;width:3px;height:20px;border-radius:2px;background:var(--accent)}
+.cx.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);box-shadow:0 0 0 3px var(--accent-soft),0 4px 14px -4px var(--accent-glow,var(--accent-soft));transform:scale(1.06)}
+.cx.on::before{content:"";position:absolute;left:-14px;top:4px;width:4px;height:28px;border-radius:0 3px 3px 0;background:var(--accent)}
 .cx.prod.on::before{background:var(--danger)}
-.cx.prod.on{box-shadow:0 0 0 3px color-mix(in oklab,var(--danger) 18%,transparent)}
 .cx.ro{border-style:dashed}
+.cx.on.ro{border-style:solid}
 .cx.prod{border-color:color-mix(in oklab,var(--danger) 45%,transparent);color:var(--danger)}
-.cx.prod.on{background:color-mix(in oklab,var(--danger) 12%,transparent);border-color:var(--danger)}
+.cx.prod.on{background:var(--danger);border-color:var(--danger);color:#fff;box-shadow:0 0 0 3px color-mix(in oklab,var(--danger) 22%,transparent)}
+.conns .cx.off:not(.busy){opacity:.5}
+.conns .cx.off:hover{opacity:1}
 .cx i{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:var(--ok);border:2px solid var(--chrome)}
-.cx.off i{background:var(--text-3)}
-.cx.busy i{background:var(--warn)}
+.cx.off i,.cx.on i{display:none}
+.cx.busy i{display:block;background:var(--warn)}
 .cx.add{border-style:dashed;color:var(--text-3);font-size:15px}
 .cx.add:hover{color:var(--accent);border-color:var(--accent-line)}
 .cx .tag{position:absolute;left:-2px;top:-2px;width:8px;height:8px;border-radius:3px;border:2px solid var(--chrome)}
@@ -95,6 +97,9 @@ button{font-family:inherit;color:inherit}
 .it .sw{width:6px;height:6px;border-radius:2px;background:var(--text-3);flex:none}
 .it.on .sw{background:var(--accent)}
 .it .star{color:var(--warn)}
+/* copy number when one collection is open in several tabs - sky, boxed, next
+   to the name, so it never reads as a document count */
+.tabno{display:inline-grid;place-items:center;min-width:20px;height:16px;padding:0 4px;border-radius:4px;font:600 10px/1 var(--mono);letter-spacing:0;color:var(--accent-2);background:color-mix(in oklab,var(--accent-2) 14%,transparent);border:1px solid color-mix(in oklab,var(--accent-2) 38%,transparent);flex:none;vertical-align:middle}
 .it svg{width:13px;height:13px;flex:none}
 .it .x{margin-left:auto;opacity:0;color:var(--text-3);display:grid;place-items:center;border-radius:4px;width:18px;height:18px;flex:none}
 .it:hover .x{opacity:1}
