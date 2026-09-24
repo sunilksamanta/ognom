@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in Ognom doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please don't include passwords, connection strings with credentials, or real customer data.
+        Security problems go to the [Security tab](https://github.com/sunilksamanta/ognom/security) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect to ...
+        2. Open collection ...
+        3. Click ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ognom version
+      description: Shown in the status bar and in About.
+      placeholder: "2.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: mongodb
+    attributes:
+      label: MongoDB version and deployment
+      placeholder: "7.0 on Atlas / 6.0 replica set / 8.0 standalone"
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How do you connect?
+      multiple: true
+      options:
+        - Connection string (mongodb://)
+        - Connection string (mongodb+srv://)
+        - Host and credentials
+        - SSH tunnel
+        - TLS / X.509
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or error messages
+      description: Paste any error text, or drag in a screenshot.
