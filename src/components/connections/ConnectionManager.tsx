@@ -116,10 +116,13 @@ export function ConnectionManager() {
     <>
       <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && closeConnections()}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="ov mid" onClick={closeConnections}>
+          {/* No onClick on the overlay: when a Select / dropdown inside the
+              modal opens, Radix disables pointer events on the content, so the
+              opening click lands on the overlay and would close the modal.
+              Radix's own outside-press handling (onOpenChange) closes it. */}
+          <DialogPrimitive.Overlay className="ov mid">
             <DialogPrimitive.Content
               className={cn("modal outline-none", view === "form" && "wide")}
-              onClick={(e) => e.stopPropagation()}
               aria-describedby={undefined}
             >
               <div className="mhd">

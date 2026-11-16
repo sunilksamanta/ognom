@@ -371,7 +371,11 @@ async function invoke(
       return null;
     case "plugin:window|start_dragging":
     case "plugin:window|toggle_maximize":
+    case "plugin:window|minimize":
+    case "plugin:window|close":
       return null;
+    case "plugin:window|is_maximized":
+      return false;
     case "app_env":
       return "macOS · arm64";
     case "security_info":
