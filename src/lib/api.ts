@@ -37,10 +37,9 @@ export const emptyFields = (): ConnFields => ({
 
 export type SshAuth = "password" | "key" | "agent";
 
-/** Optional SSH tunnel (bastion) a connection runs through. The password or
- *  key passphrase is stored encrypted separately, never in this object. */
-export interface SshConfig {
-  enabled: boolean;
+/** One SSH server on the way to MongoDB. The password or key passphrase is
+ *  stored encrypted separately, never in this object. */
+export interface SshHop {
   host: string;
   port?: number | null;
   username: string;
@@ -48,14 +47,30 @@ export interface SshConfig {
   keyPath?: string | null;
 }
 
-export const emptySsh = (): SshConfig => ({
-  enabled: false,
+/** Optional SSH tunnel (bastion) a connection runs through. */
+export interface SshConfig extends SshHop {
+  enabled: boolean;
+  /** Jump host (like `ssh -J`) the SSH host is reached through; null for none. */
+  jump?: SshHop | null;
+}
+
+export const emptySshHop = (): SshHop => ({
   host: "",
   port: 22,
   username: "",
   auth: "key",
   keyPath: "~/.ssh/id_ed25519",
 });
+
+export const emptySsh = (): SshConfig => ({
+  enabled: false,
+  ...emptySshHop(),
+  jump: null,
+});
+
+/** "user@host" or "user@host:2222" for display. */
+export const sshHopLabel = (h: SshHop): string =>
+  `${h.username ? `${h.username}@` : ""}${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ""}`;
 
 export type ProfileKind = "fields" | "uri";
 
@@ -75,6 +90,8 @@ export interface ProfileInput {
   ssh?: SshConfig;
   /** SSH password / key passphrase; null on edit keeps the stored one. */
   sshSecret?: string | null;
+  /** Same, for the SSH jump host. */
+  sshJumpSecret?: string | null;
 }
 
 export interface ProfileSummary {
@@ -90,6 +107,7 @@ export interface ProfileSummary {
   fields: ConnFields;
   ssh: SshConfig;
   hasSshSecret: boolean;
+  hasSshJumpSecret: boolean;
   lastUsedAt?: string | null;
 }
 
@@ -104,7 +122,7 @@ export interface ConnectionInfo {
   latencyMs: number;
   color?: string | null;
   access: AccessMode;
-  /** "user@bastion" when connected through an SSH tunnel. */
+  /** "user@bastion" (plus " (jump user@host)") when connected through an SSH tunnel. */
   ssh?: string | null;
 }
 
@@ -379,7 +397,7 @@ export class ReadOnlyError extends Error {
     super(
       name
         ? `${name} is read-only. Switch to edit mode in the status bar to make changes.`
-        : "This workspace is read-only. Switch to edit mode in the status bar to make changes."
+        : "This workspace is read-only. Switch to edit mode in the status bar to make changes.",
     );
     this.name = "ReadOnlyError";
   }
@@ -414,7 +432,11 @@ function guard(workspace?: string | null): void {
   }
 }
 
-const w = <A extends unknown[], R>(fn: (...args: A) => Promise<R>, pick?: (...args: A) => string | null | undefined) =>
+const w =
+  <A extends unknown[], R>(
+    fn: (...args: A) => Promise<R>,
+    pick?: (...args: A) => string | null | undefined,
+  ) =>
   (...args: A): Promise<R> => {
     try {
       guard(pick?.(...args));
@@ -431,14 +453,19 @@ export const api = {
   setSecretBackend: (backend: "keychain" | "file") =>
     invoke<SecurityInfo>("set_secret_backend", { backend }),
   listConnections: () => invoke<ProfileSummary[]>("list_connections"),
-  saveConnection: (input: ProfileInput) => invoke<ProfileSummary>("save_connection", { input }),
+  saveConnection: (input: ProfileInput) =>
+    invoke<ProfileSummary>("save_connection", { input }),
   deleteConnection: (id: string) => invoke<void>("delete_connection", { id }),
   testConnection: (args: { input?: ProfileInput; profileId?: string }) =>
     invoke<TestResult>("test_connection", args),
-  connect: (profileId: string) => invoke<ConnectionInfo>("connect", { profileId }),
-  connectInput: (input: ProfileInput) => invoke<ConnectionInfo>("connect_input", { input }),
-  switchWorkspace: (id: string) => invoke<ConnectionInfo>("switch_workspace", { id }),
-  disconnectWorkspace: (id: string) => invoke<void>("disconnect_workspace", { id }),
+  connect: (profileId: string) =>
+    invoke<ConnectionInfo>("connect", { profileId }),
+  connectInput: (input: ProfileInput) =>
+    invoke<ConnectionInfo>("connect_input", { input }),
+  switchWorkspace: (id: string) =>
+    invoke<ConnectionInfo>("switch_workspace", { id }),
+  disconnectWorkspace: (id: string) =>
+    invoke<void>("disconnect_workspace", { id }),
   disconnect: () => invoke<void>("disconnect"),
   connectionUri: (profileId: string, includePassword: boolean) =>
     invoke<string>("connection_uri", { profileId, includePassword }),
@@ -455,15 +482,20 @@ export const api = {
   serverInfo: () => invoke<ServerInfoRaw>("server_info"),
 
   // metadata - pass a workspace id to read a non-active open connection
-  listDatabases: (workspace?: string) => invoke<DbInfo[]>("list_databases", { workspace }),
+  listDatabases: (workspace?: string) =>
+    invoke<DbInfo[]>("list_databases", { workspace }),
   listCollections: (database: string, workspace?: string) =>
     invoke<CollInfo[]>("list_collections", { database, workspace }),
   /** Estimated document count per collection name (views and failures omitted). */
   collectionCounts: (database: string, workspace?: string) =>
-    invoke<Record<string, number>>("collection_counts", { database, workspace }),
+    invoke<Record<string, number>>("collection_counts", {
+      database,
+      workspace,
+    }),
 
   // documents
-  findDocuments: (req: FindRequest) => invoke<DocsPage>("find_documents", { req }),
+  findDocuments: (req: FindRequest) =>
+    invoke<DocsPage>("find_documents", { req }),
   countDocuments: (database: string, collection: string, filter: string) =>
     invoke<CountResult>("count_documents", { database, collection, filter }),
   aggregate: (
@@ -471,7 +503,7 @@ export const api = {
     collection: string,
     stages: StageInput[],
     allowDiskUse: boolean,
-    readOnly?: boolean
+    readOnly?: boolean,
   ) =>
     invoke<DocsPage>("aggregate_collection", {
       database,
@@ -484,70 +516,104 @@ export const api = {
     database: string,
     collection: string,
     stages: StageInput[],
-    allowDiskUse: boolean
+    allowDiskUse: boolean,
   ) =>
-    invoke<StageStat[]>("aggregate_stage_stats", { database, collection, stages, allowDiskUse }),
+    invoke<StageStat[]>("aggregate_stage_stats", {
+      database,
+      collection,
+      stages,
+      allowDiskUse,
+    }),
   insertDocument: w((database: string, collection: string, docText: string) =>
-    invoke<{ insertedId: unknown }>("insert_document", { database, collection, docText })),
-  replaceDocument: w((database: string, collection: string, id: unknown, docText: string) =>
-    invoke<{ matched: number; modified: number }>("replace_document", {
+    invoke<{ insertedId: unknown }>("insert_document", {
+      database,
+      collection,
+      docText,
+    }),
+  ),
+  replaceDocument: w(
+    (database: string, collection: string, id: unknown, docText: string) =>
+      invoke<{ matched: number; modified: number }>("replace_document", {
+        database,
+        collection,
+        id,
+        docText,
+      }),
+  ),
+  deleteDocument: w((database: string, collection: string, id: unknown) =>
+    invoke<{ deleted: number }>("delete_document", {
       database,
       collection,
       id,
-      docText,
-    })),
-  deleteDocument: w((database: string, collection: string, id: unknown) =>
-    invoke<{ deleted: number }>("delete_document", { database, collection, id })),
+    }),
+  ),
 
-  bulkUpdate: w((database: string, collection: string, filter: string, update: string) =>
-    invoke<{ matched: number; modified: number; execMs: number }>("bulk_update", {
+  bulkUpdate: w(
+    (database: string, collection: string, filter: string, update: string) =>
+      invoke<{ matched: number; modified: number; execMs: number }>(
+        "bulk_update",
+        {
+          database,
+          collection,
+          filter,
+          update,
+        },
+      ),
+  ),
+  bulkDelete: w((database: string, collection: string, filter: string) =>
+    invoke<{ deleted: number; execMs: number }>("bulk_delete", {
       database,
       collection,
       filter,
-      update,
-    })),
-  bulkDelete: w((database: string, collection: string, filter: string) =>
-    invoke<{ deleted: number; execMs: number }>("bulk_delete", { database, collection, filter })),
+    }),
+  ),
 
   // collection operations
   dropCollection: w((database: string, collection: string) =>
-    invoke<void>("drop_collection", { database, collection })),
+    invoke<void>("drop_collection", { database, collection }),
+  ),
   clearCollection: w((database: string, collection: string) =>
-    invoke<number>("clear_collection", { database, collection })),
+    invoke<number>("clear_collection", { database, collection }),
+  ),
   duplicateCollection: w((database: string, source: string, target: string) =>
     invoke<{ documents: number; indexes: number }>("duplicate_collection", {
       database,
       source,
       target,
-    })),
+    }),
+  ),
   copyCollection: w(
     (req: CopyRequest) => invoke<CopyOutcome>("copy_collection", { req }),
-    (req) => req.targetWorkspace
+    (req) => req.targetWorkspace,
   ),
-  diffCollections: (req: DiffRequest) => invoke<DiffOutcome>("diff_collections", { req }),
+  diffCollections: (req: DiffRequest) =>
+    invoke<DiffOutcome>("diff_collections", { req }),
   syncDocuments: w(
     (req: SyncRequest) => invoke<number>("sync_documents", { req }),
-    (req) => req.targetWorkspace
+    (req) => req.targetWorkspace,
   ),
   cancelJob: (jobId: string) => invoke<void>("cancel_job", { jobId }),
 
   // indexes & stats
   listIndexes: (database: string, collection: string) =>
     invoke<IndexInfo[]>("list_indexes", { database, collection }),
-  createIndex: w((args: {
-    database: string;
-    collection: string;
-    keysText: string;
-    name?: string;
-    unique: boolean;
-    ttlSeconds?: number;
-    sparse?: boolean;
-    hidden?: boolean;
-    partialFilterText?: string;
-    collationLocale?: string;
-  }) => invoke<string>("create_index", args)),
+  createIndex: w(
+    (args: {
+      database: string;
+      collection: string;
+      keysText: string;
+      name?: string;
+      unique: boolean;
+      ttlSeconds?: number;
+      sparse?: boolean;
+      hidden?: boolean;
+      partialFilterText?: string;
+      collationLocale?: string;
+    }) => invoke<string>("create_index", args),
+  ),
   dropIndex: w((database: string, collection: string, name: string) =>
-    invoke<void>("drop_index", { database, collection, name })),
+    invoke<void>("drop_index", { database, collection, name }),
+  ),
   collectionStats: (database: string, collection: string) =>
     invoke<CollectionStats>("collection_stats", { database, collection }),
 
@@ -562,10 +628,22 @@ export const api = {
     verbosity?: string;
   }) => invoke<ExplainSummary>("explain_query", args),
   analyzeSchema: (database: string, collection: string, sampleSize?: number) =>
-    invoke<SchemaReport>("analyze_schema", { database, collection, sampleSize }),
+    invoke<SchemaReport>("analyze_schema", {
+      database,
+      collection,
+      sampleSize,
+    }),
   /** Nested shape for the TypeScript / Zod exporter. */
-  inferSchemaTree: (database: string, collection: string, sampleSize?: number) =>
-    invoke<import("@/lib/tsgen").SchemaTree>("infer_schema_tree", { database, collection, sampleSize }),
+  inferSchemaTree: (
+    database: string,
+    collection: string,
+    sampleSize?: number,
+  ) =>
+    invoke<import("@/lib/tsgen").SchemaTree>("infer_schema_tree", {
+      database,
+      collection,
+      sampleSize,
+    }),
   collectionFields: (database: string, collection: string, limit?: number) =>
     invoke<string[]>("collection_fields", { database, collection, limit }),
   exportCollection: (args: {
@@ -578,20 +656,32 @@ export const api = {
     /** Enables `copy-progress` events and cancellation via cancelJob. */
     jobId?: string;
   }) => invoke<CopyOutcome>("export_collection", args),
-  importDocuments: w((database: string, collection: string, path: string, jobId?: string) =>
-    invoke<CopyOutcome>("import_documents", { database, collection, path, jobId })),
+  importDocuments: w(
+    (database: string, collection: string, path: string, jobId?: string) =>
+      invoke<CopyOutcome>("import_documents", {
+        database,
+        collection,
+        path,
+        jobId,
+      }),
+  ),
 
   // database overview
-  dbOverview: (database: string) => invoke<DbOverview>("db_overview", { database }),
-  pingWorkspace: (workspace?: string) => invoke<number>("ping_workspace", { workspace }),
-  saveTextFile: (path: string, content: string) => invoke<void>("save_text_file", { path, content }),
+  dbOverview: (database: string) =>
+    invoke<DbOverview>("db_overview", { database }),
+  pingWorkspace: (workspace?: string) =>
+    invoke<number>("ping_workspace", { workspace }),
+  saveTextFile: (path: string, content: string) =>
+    invoke<void>("save_text_file", { path, content }),
 
   // ops panel
   currentOps: () => invoke<Doc[]>("current_ops"),
   killOp: w((opId: unknown) => invoke<void>("kill_op", { opId })),
-  profilerStatus: (database: string) => invoke<Doc>("profiler_status", { database }),
+  profilerStatus: (database: string) =>
+    invoke<Doc>("profiler_status", { database }),
   setProfiler: w((database: string, level: number, slowMs?: number) =>
-    invoke<Doc>("set_profiler", { database, level, slowMs })),
+    invoke<Doc>("set_profiler", { database, level, slowMs }),
+  ),
   profilerEntries: (database: string, limit?: number) =>
     invoke<Doc[]>("profiler_entries", { database, limit }),
   serverStatusLight: () => invoke<Doc>("server_status_light"),
@@ -599,7 +689,11 @@ export const api = {
   // shell
   /** Read-only workspaces pass `readOnly` so the backend rejects any write. */
   runShell: (database: string, text: string) =>
-    invoke<ShellOutcome>("run_shell", { database, text, readOnly: writeGuard.isReadOnly() }),
+    invoke<ShellOutcome>("run_shell", {
+      database,
+      text,
+      readOnly: writeGuard.isReadOnly(),
+    }),
 };
 
 /** Normalize a thrown invoke error (string or Error) to a message. */

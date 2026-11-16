@@ -153,7 +153,7 @@ pub struct SecurityInfo {
     pub degraded: bool,
 }
 
-type SshParams = Option<(crate::ssh::SshConfig, Option<String>)>;
+type SshParams = Option<(crate::ssh::SshConfig, crate::ssh::SshSecrets)>;
 
 async fn establish(
     uri: &str,
@@ -195,7 +195,7 @@ async fn establish(
     // point the driver at it directly - replica-set discovery would hand back
     // member addresses that only resolve on the far side of the bastion.
     let tunnel = match &ssh {
-        Some((cfg, secret)) => {
+        Some((cfg, secrets)) => {
             let (target_host, target_port) = match options.hosts.first() {
                 Some(mongodb::options::ServerAddress::Tcp { host, port }) => {
                     (host.clone(), port.unwrap_or(27017))
@@ -203,7 +203,7 @@ async fn establish(
                 _ => return Err(AppError::Other("SSH tunnels need a TCP host".into())),
             };
             let tunnel =
-                crate::ssh::open(cfg, secret.as_deref(), &target_host, target_port, data_dir).await?;
+                crate::ssh::open(cfg, secrets, &target_host, target_port, data_dir).await?;
             options.hosts = vec![mongodb::options::ServerAddress::Tcp {
                 host: "127.0.0.1".into(),
                 port: Some(tunnel.local_port),
@@ -333,19 +333,24 @@ pub async fn test_connection(
     let ssh: SshParams = match (&input, &profile_id) {
         (Some(input), _) if input.ssh.is_active() => {
             // Blank secret while editing: borrow the stored one.
-            let typed = input.ssh_secret.clone().filter(|s| !s.is_empty());
-            let stored = match (&typed, &input.id) {
-                (None, Some(id)) => state
+            let stored = match &input.id {
+                Some(id) => state
                     .store
                     .lock()
                     .unwrap()
                     .ssh_for(id, &crypto)
                     .ok()
                     .flatten()
-                    .and_then(|(_, s)| s),
-                _ => None,
+                    .map(|(_, s)| s)
+                    .unwrap_or_default(),
+                None => crate::ssh::SshSecrets::default(),
             };
-            Some((input.ssh.clone(), typed.or(stored)))
+            let typed = |s: &Option<String>| s.clone().filter(|s| !s.is_empty());
+            let secrets = crate::ssh::SshSecrets {
+                server: typed(&input.ssh_secret).or(stored.server),
+                jump: typed(&input.ssh_jump_secret).or(stored.jump),
+            };
+            Some((input.ssh.clone(), secrets))
         }
         (Some(_), _) => None,
         (None, Some(id)) => state.store.lock().unwrap().ssh_for(id, &crypto)?,
@@ -433,10 +438,13 @@ pub async fn connect_input(
         "adhoc-{}",
         state.adhoc_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
-    let ssh = input
-        .ssh
-        .is_active()
-        .then(|| (input.ssh.clone(), input.ssh_secret.clone().filter(|s| !s.is_empty())));
+    let ssh = input.ssh.is_active().then(|| {
+        let secrets = crate::ssh::SshSecrets {
+            server: input.ssh_secret.clone().filter(|s| !s.is_empty()),
+            jump: input.ssh_jump_secret.clone().filter(|s| !s.is_empty()),
+        };
+        (input.ssh.clone(), secrets)
+    });
     let (client, mut info, tunnel) = establish(&uri, name, None, ssh, &state.data_dir).await?;
     info.id = id.clone();
     info.color = input.color.clone();

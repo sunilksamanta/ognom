@@ -100,6 +100,7 @@ See the [release notes](https://github.com/sunilksamanta/ognom/releases) for the
 - MongoDB Atlas, self-hosted servers, replica sets and sharded clusters.
 - SCRAM-SHA-1, SCRAM-SHA-256, X.509 and LDAP (PLAIN) authentication; TLS with a custom CA or client certificate; read preferences, timeouts, pool size and extra URI options.
 - **SSH tunnels** through a bastion or jump host, with a key file (and optional passphrase), a password or ssh-agent. Host keys are checked against `~/.ssh/known_hosts`; a host seen for the first time is remembered, and a changed key is refused.
+- **Two-hop tunnels** (like `ssh -J`): reach an SSH server that is only reachable through another one. Turn on *Reach the SSH host through a jump host* and give the jump host its own login. The MongoDB host is resolved on the inner server, so `127.0.0.1:27017` reaches a mongod that only listens locally there.
 - Name, colour tag and **session mode** per connection: Read & write, Read-only, or Production.
 - **Test** a connection before saving: latency, topology and server version.
 - **Export and import** connections: without passwords (safe to share), or as a passphrase-encrypted backup that carries credentials.

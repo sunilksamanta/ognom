@@ -41,6 +41,9 @@ pub struct ExportConn {
     pub ssh: crate::ssh::SshConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_secret: Option<String>,
+    /// Password or key passphrase for the SSH jump host (full exports only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_jump_secret: Option<String>,
 }
 
 /// Argon2 parameters, stored alongside the ciphertext so import can re-derive.
@@ -122,6 +125,7 @@ pub fn build_export(
             .map(|mut c| {
                 c.secret = None;
                 c.ssh_secret = None;
+                c.ssh_jump_secret = None;
                 c
             })
             .collect();
@@ -252,6 +256,7 @@ mod tests {
             secret: Some("mongodb+srv://u:hunter2@c.mongodb.net/".into()),
             ssh: Default::default(),
             ssh_secret: Some("bastion-pass".into()),
+            ssh_jump_secret: Some("jump-pass".into()),
         }]
     }
 
@@ -262,6 +267,7 @@ mod tests {
         let back = parse_export(&json, None).unwrap();
         assert!(back[0].secret.is_none());
         assert!(!json.contains("bastion-pass"));
+        assert!(!json.contains("jump-pass"));
     }
 
     #[test]
@@ -270,6 +276,7 @@ mod tests {
         assert!(!json.contains("hunter2"));
         let back = parse_export(&json, Some("correct horse")).unwrap();
         assert_eq!(back[0].secret.as_deref(), Some("mongodb+srv://u:hunter2@c.mongodb.net/"));
+        assert_eq!(back[0].ssh_jump_secret.as_deref(), Some("jump-pass"));
     }
 
     #[test]

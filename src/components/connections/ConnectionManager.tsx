@@ -72,7 +72,7 @@ export function ConnectionManager() {
         password: null,
         ssh: p.ssh,
       });
-      toast.success(p.hasSecret || p.hasSshSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
+      toast.success(p.hasSecret || p.hasSshSecret || p.hasSshJumpSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -116,10 +116,13 @@ export function ConnectionManager() {
     <>
       <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && closeConnections()}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="ov mid" onClick={closeConnections}>
+          {/* No onClick on the overlay: when a Select / dropdown inside the
+              modal opens, Radix disables pointer events on the content, so the
+              opening click lands on the overlay and would close the modal.
+              Radix's own outside-press handling (onOpenChange) closes it. */}
+          <DialogPrimitive.Overlay className="ov mid">
             <DialogPrimitive.Content
               className={cn("modal outline-none", view === "form" && "wide")}
-              onClick={(e) => e.stopPropagation()}
               aria-describedby={undefined}
             >
               <div className="mhd">
@@ -214,12 +217,10 @@ export function ConnectionManager() {
                             className={cn("idxrow group cursor-pointer hover:bg-hover", connectingId === p.id && "acc")}
                           >
                             <span
-                              className={cn("cx", p.access === "production" && "prod", p.access === "readonly" && "ro", !live && "off")}
-                              style={{ width: 32, height: 32, fontSize: 11 }}
+                              className={cn("cx", p.color && "tagged", p.access === "production" && "prod", !live && "off")}
+                              style={{ width: 32, height: 32, fontSize: 11, ...(p.color ? { "--tag": p.color } : {}) } as React.CSSProperties}
                             >
-                              {p.color && <span className="tag" style={{ background: p.color }} />}
                               {initials(p.name)}
-                              <i />
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="hstack">

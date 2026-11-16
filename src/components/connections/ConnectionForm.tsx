@@ -2,18 +2,36 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { homeDir } from "@tauri-apps/api/path";
-import { CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, FolderOpen, Loader2, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Loader2,
+  XCircle,
+} from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   api,
   emptyFields,
   emptySsh,
+  emptySshHop,
   errMsg,
+  sshHopLabel,
   type AccessMode,
   type ProfileInput,
   type ProfileSummary,
   type SshAuth,
+  type SshHop,
   type TestResult,
 } from "@/lib/api";
 import { useConnections } from "@/stores/connections";
@@ -37,7 +55,17 @@ const SSH_AUTH: { id: SshAuth; label: string }[] = [
 ];
 
 /** Password input with a show/hide toggle, in the `.in` shell. */
-function SecretInput({ id, value, onChange, placeholder }: { id?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+function SecretInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
   const [show, setShow] = useState(false);
   return (
     <div className="in" style={{ padding: "0 4px 0 12px" }}>
@@ -50,17 +78,181 @@ function SecretInput({ id, value, onChange, placeholder }: { id?: string; value:
         autoComplete="off"
         className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
       />
-      <button type="button" tabIndex={-1} className="ico sm" onClick={() => setShow((s) => !s)} aria-label="Toggle visibility">
+      <button
+        type="button"
+        tabIndex={-1}
+        className="ico sm"
+        onClick={() => setShow((s) => !s)}
+        aria-label="Toggle visibility"
+      >
         {show ? <EyeOff /> : <Eye />}
       </button>
     </div>
   );
 }
 
-const ACCESS: { id: AccessMode; label: string; hint: string; danger?: boolean }[] = [
-  { id: "readwrite", label: "Read & write", hint: "full access, confirmations on destructive writes" },
-  { id: "readonly", label: "Read-only", hint: "opens read-only, switch to edit mode from the status bar" },
-  { id: "production", label: "Production", hint: "read-only by default, red tag on the rail, extra confirmation before edits", danger: true },
+async function pickKeyFile(): Promise<string | null> {
+  const home = await homeDir().catch(() => undefined);
+  const picked = await openFile({
+    title: "Choose SSH private key",
+    defaultPath: home ? `${home}/.ssh` : undefined,
+    multiple: false,
+    directory: false,
+  }).catch(() => null);
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Host, port, user and authentication of one SSH server (the SSH host or the jump host). */
+function SshHopFields({
+  id,
+  labels,
+  hostPlaceholder,
+  hop,
+  onChange,
+  secret,
+  onSecret,
+  secretStored,
+}: {
+  id: string;
+  labels: { host: string; port: string; user: string; password: string };
+  hostPlaceholder: string;
+  hop: SshHop;
+  onChange: <K extends keyof SshHop>(key: K, value: SshHop[K]) => void;
+  secret: string;
+  onSecret: (v: string) => void;
+  secretStored: boolean;
+}) {
+  return (
+    <>
+      <div className="two" style={{ gridTemplateColumns: "1fr 110px" }}>
+        <Field label={labels.host} htmlFor={`${id}-host`}>
+          <input
+            id={`${id}-host`}
+            className="in"
+            placeholder={hostPlaceholder}
+            value={hop.host}
+            onChange={(e) => onChange("host", e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </Field>
+        <Field label={labels.port} htmlFor={`${id}-port`}>
+          <input
+            id={`${id}-port`}
+            className="in"
+            inputMode="numeric"
+            placeholder="22"
+            value={hop.port ?? ""}
+            onChange={(e) =>
+              onChange(
+                "port",
+                e.target.value ? parseInt(e.target.value, 10) || null : null,
+              )
+            }
+          />
+        </Field>
+      </div>
+      <div className="two">
+        <Field label={labels.user} htmlFor={`${id}-user`}>
+          <input
+            id={`${id}-user`}
+            className="in"
+            placeholder="ubuntu"
+            value={hop.username}
+            onChange={(e) => onChange("username", e.target.value)}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </Field>
+        <Field label="Authentication">
+          <div className="seg no-select" style={{ height: 34 }}>
+            {SSH_AUTH.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className={cn("flex-1", hop.auth === a.id && "on")}
+                onClick={() => onChange("auth", a.id)}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+      {hop.auth === "key" && (
+        <div className="two">
+          <Field label="Private key" htmlFor={`${id}-key`}>
+            <div className="in" style={{ padding: "0 4px 0 12px" }}>
+              <input
+                id={`${id}-key`}
+                className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
+                placeholder="~/.ssh/id_ed25519"
+                value={hop.keyPath ?? ""}
+                onChange={(e) => onChange("keyPath", e.target.value || null)}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="ico sm"
+                onClick={() =>
+                  void pickKeyFile().then(
+                    (path) => path && onChange("keyPath", path),
+                  )
+                }
+                aria-label="Choose key file"
+              >
+                <FolderOpen />
+              </button>
+            </div>
+          </Field>
+          <Field label="Key passphrase" htmlFor={`${id}-pass`}>
+            <SecretInput
+              id={`${id}-pass`}
+              placeholder={secretStored ? "(unchanged)" : "(none)"}
+              value={secret}
+              onChange={onSecret}
+            />
+          </Field>
+        </div>
+      )}
+      {hop.auth === "password" && (
+        <Field label={labels.password} htmlFor={`${id}-pass`}>
+          <SecretInput
+            id={`${id}-pass`}
+            placeholder={secretStored ? "(unchanged)" : "required"}
+            value={secret}
+            onChange={onSecret}
+          />
+        </Field>
+      )}
+    </>
+  );
+}
+
+const ACCESS: {
+  id: AccessMode;
+  label: string;
+  hint: string;
+  danger?: boolean;
+}[] = [
+  {
+    id: "readwrite",
+    label: "Read & write",
+    hint: "full access, confirmations on destructive writes",
+  },
+  {
+    id: "readonly",
+    label: "Read-only",
+    hint: "opens read-only, switch to edit mode from the status bar",
+  },
+  {
+    id: "production",
+    label: "Production",
+    hint: "read-only by default, red tag on the rail, extra confirmation before edits",
+    danger: true,
+  },
 ];
 
 interface ConnectionFormProps {
@@ -70,7 +262,17 @@ interface ConnectionFormProps {
 }
 
 /** Field wrapper in the design's `.fld` shape. */
-function Field({ label, hint, children, htmlFor }: { label: string; hint?: string; children: React.ReactNode; htmlFor?: string }) {
+function Field({
+  label,
+  hint,
+  children,
+  htmlFor,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
   return (
     <div className="fld">
       <label htmlFor={htmlFor}>{label}</label>
@@ -80,19 +282,37 @@ function Field({ label, hint, children, htmlFor }: { label: string; hint?: strin
   );
 }
 
-export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProps) {
+export function ConnectionForm({
+  editing,
+  onDone,
+  onCancel,
+}: ConnectionFormProps) {
   const { save, connect, connectAdhoc } = useConnections();
 
   const [name, setName] = useState(editing?.name ?? "");
   const [color, setColor] = useState(editing?.color ?? PROFILE_COLORS[0]);
-  const [access, setAccess] = useState<AccessMode>(editing?.access ?? "readwrite");
+  const [access, setAccess] = useState<AccessMode>(
+    editing?.access ?? "readwrite",
+  );
   const [kind, setKind] = useState<"fields" | "uri">(editing?.kind ?? "uri");
   const [uri, setUri] = useState("");
   const [password, setPassword] = useState("");
-  const [fields, setFields] = useState(() => ({ ...emptyFields(), ...(editing?.fields ?? {}) }));
+  const [fields, setFields] = useState(() => ({
+    ...emptyFields(),
+    ...(editing?.fields ?? {}),
+  }));
   const [advanced, setAdvanced] = useState(false);
-  const [ssh, setSsh] = useState(() => ({ ...emptySsh(), ...(editing?.ssh ?? {}) }));
+  const [ssh, setSsh] = useState(() => ({
+    ...emptySsh(),
+    ...(editing?.ssh ?? {}),
+  }));
   const [sshSecret, setSshSecret] = useState("");
+  const [jumpOn, setJumpOn] = useState(() => !!editing?.ssh.jump);
+  const [jump, setJump] = useState<SshHop>(() => ({
+    ...emptySshHop(),
+    ...(editing?.ssh.jump ?? {}),
+  }));
+  const [jumpSecret, setJumpSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState<"save" | "connect" | "adhoc" | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -102,20 +322,24 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
     setSsh((prev) => ({ ...prev, [key]: value }));
     setTestResult(null);
   };
-  /** Stored SSH secret applies only while the auth method that needs it is unchanged. */
-  const sshSecretStored = !!editing?.hasSshSecret && editing.ssh.auth === ssh.auth;
-
-  const pickKeyFile = async () => {
-    const home = await homeDir().catch(() => undefined);
-    const picked = await openFile({
-      title: "Choose SSH private key",
-      defaultPath: home ? `${home}/.ssh` : undefined,
-      multiple: false,
-      directory: false,
-    }).catch(() => null);
-    if (typeof picked === "string") s("keyPath", picked);
+  /** Field setters for the SSH host and the jump host. */
+  const sHop = <K extends keyof SshHop>(key: K, value: SshHop[K]) => {
+    setSsh((prev) => ({ ...prev, [key]: value }));
+    setTestResult(null);
   };
-  const f = <K extends keyof typeof fields>(key: K, value: (typeof fields)[K]) => {
+  const j = <K extends keyof SshHop>(key: K, value: SshHop[K]) => {
+    setJump((prev) => ({ ...prev, [key]: value }));
+    setTestResult(null);
+  };
+  /** Stored SSH secret applies only while the auth method that needs it is unchanged. */
+  const sshSecretStored =
+    !!editing?.hasSshSecret && editing.ssh.auth === ssh.auth;
+  const jumpSecretStored =
+    !!editing?.hasSshJumpSecret && editing.ssh.jump?.auth === jump.auth;
+  const f = <K extends keyof typeof fields>(
+    key: K,
+    value: (typeof fields)[K],
+  ) => {
     setFields((prev) => ({ ...prev, [key]: value }));
     setTestResult(null);
   };
@@ -137,18 +361,40 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
     fields,
     uri: kind === "uri" ? uri.trim() || null : null,
     password: password || null,
-    ssh: { ...ssh, host: ssh.host.trim(), username: ssh.username.trim() },
+    ssh: {
+      ...ssh,
+      host: ssh.host.trim(),
+      username: ssh.username.trim(),
+      jump: jumpOn
+        ? { ...jump, host: jump.host.trim(), username: jump.username.trim() }
+        : null,
+    },
     sshSecret: ssh.enabled && ssh.auth !== "agent" ? sshSecret || null : null,
+    sshJumpSecret:
+      ssh.enabled && jumpOn && jump.auth !== "agent"
+        ? jumpSecret || null
+        : null,
   });
 
   const validate = (): string | null => {
-    if (kind === "uri" && !uri.trim() && !editing?.hasSecret) return "Paste a connection string first";
+    if (kind === "uri" && !uri.trim() && !editing?.hasSecret)
+      return "Paste a connection string first";
     if (kind === "fields" && !fields.host.trim()) return "Host is required";
     if (ssh.enabled) {
       if (!ssh.host.trim()) return "SSH host is required";
       if (!ssh.username.trim()) return "SSH username is required";
-      if (ssh.auth === "key" && !ssh.keyPath?.trim()) return "Choose a private key file for the SSH tunnel";
-      if (ssh.auth === "password" && !sshSecret && !sshSecretStored) return "Enter the SSH password";
+      if (ssh.auth === "key" && !ssh.keyPath?.trim())
+        return "Choose a private key file for the SSH tunnel";
+      if (ssh.auth === "password" && !sshSecret && !sshSecretStored)
+        return "Enter the SSH password";
+      if (jumpOn) {
+        if (!jump.host.trim()) return "Jump host is required";
+        if (!jump.username.trim()) return "Jump host username is required";
+        if (jump.auth === "key" && !jump.keyPath?.trim())
+          return "Choose a private key file for the jump host";
+        if (jump.auth === "password" && !jumpSecret && !jumpSecretStored)
+          return "Enter the jump host password";
+      }
     }
     return null;
   };
@@ -201,10 +447,22 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
     <>
       <div className="mbd">
         <div className="seg self-start no-select">
-          <button className={cn(kind === "uri" && "on")} onClick={() => { setKind("uri"); setTestResult(null); }}>
+          <button
+            className={cn(kind === "uri" && "on")}
+            onClick={() => {
+              setKind("uri");
+              setTestResult(null);
+            }}
+          >
             Connection string
           </button>
-          <button className={cn(kind === "fields" && "on")} onClick={() => { setKind("fields"); setTestResult(null); }}>
+          <button
+            className={cn(kind === "fields" && "on")}
+            onClick={() => {
+              setKind("fields");
+              setTestResult(null);
+            }}
+          >
             Host and credentials
           </button>
         </div>
@@ -222,9 +480,16 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
             <input
               id="conn-uri"
               className="in"
-              placeholder={editing?.hasSecret ? "(stored - paste a new one to replace)" : "mongodb+srv://user:pass@cluster0.mongodb.net/?retryWrites=true"}
+              placeholder={
+                editing?.hasSecret
+                  ? "(stored - paste a new one to replace)"
+                  : "mongodb+srv://user:pass@cluster0.mongodb.net/?retryWrites=true"
+              }
               value={uri}
-              onChange={(e) => { setUri(e.target.value); setTestResult(null); }}
+              onChange={(e) => {
+                setUri(e.target.value);
+                setTestResult(null);
+              }}
               spellCheck={false}
               autoComplete="off"
               autoFocus
@@ -232,32 +497,75 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
           </Field>
         ) : (
           <>
-            <div className="two" style={{ gridTemplateColumns: srv ? "1fr" : "1fr 110px" }}>
+            <div
+              className="two"
+              style={{ gridTemplateColumns: srv ? "1fr" : "1fr 110px" }}
+            >
               <Field label="Host" htmlFor="conn-host">
-                <input id="conn-host" className="in" placeholder={srv ? "cluster0.abc.mongodb.net" : "localhost"} value={fields.host} onChange={(e) => f("host", e.target.value)} autoFocus />
+                <input
+                  id="conn-host"
+                  className="in"
+                  placeholder={srv ? "cluster0.abc.mongodb.net" : "localhost"}
+                  value={fields.host}
+                  onChange={(e) => f("host", e.target.value)}
+                  autoFocus
+                />
               </Field>
               {!srv && (
                 <Field label="Port" htmlFor="conn-port">
-                  <input id="conn-port" className="in" inputMode="numeric" placeholder="27017" value={fields.port ?? ""} onChange={(e) => f("port", e.target.value ? parseInt(e.target.value, 10) || null : null)} />
+                  <input
+                    id="conn-port"
+                    className="in"
+                    inputMode="numeric"
+                    placeholder="27017"
+                    value={fields.port ?? ""}
+                    onChange={(e) =>
+                      f(
+                        "port",
+                        e.target.value
+                          ? parseInt(e.target.value, 10) || null
+                          : null,
+                      )
+                    }
+                  />
                 </Field>
               )}
             </div>
             <div className="two">
               <Field label="Username" htmlFor="conn-user">
-                <input id="conn-user" className="in" placeholder="(none)" value={fields.username ?? ""} onChange={(e) => f("username", e.target.value || null)} autoCapitalize="off" autoCorrect="off" />
+                <input
+                  id="conn-user"
+                  className="in"
+                  placeholder="(none)"
+                  value={fields.username ?? ""}
+                  onChange={(e) => f("username", e.target.value || null)}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
               </Field>
               <Field label="Password" htmlFor="conn-pass">
                 <SecretInput
                   id="conn-pass"
                   placeholder={editing?.hasSecret ? "(unchanged)" : "(none)"}
                   value={password}
-                  onChange={(v) => { setPassword(v); setTestResult(null); }}
+                  onChange={(v) => {
+                    setPassword(v);
+                    setTestResult(null);
+                  }}
                 />
               </Field>
             </div>
 
-            <button type="button" onClick={() => setAdvanced((a) => !a)} className="hstack self-start text-[12px] font-medium text-text-2 hover:text-text">
-              {advanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            <button
+              type="button"
+              onClick={() => setAdvanced((a) => !a)}
+              className="hstack self-start text-[12px] font-medium text-text-2 hover:text-text"
+            >
+              {advanced ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" />
+              )}
               Advanced options
             </button>
 
@@ -265,30 +573,64 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
               <div className="stack rounded-[var(--r)] border border-line bg-panel p-4">
                 <div className="two">
                   <Field label="Scheme">
-                    <Select value={fields.scheme} onValueChange={(v) => f("scheme", v as never)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Select
+                      value={fields.scheme}
+                      onValueChange={(v) => f("scheme", v as never)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="mongodb">mongodb - standard</SelectItem>
-                        <SelectItem value="mongodb+srv">mongodb+srv - DNS seed list</SelectItem>
+                        <SelectItem value="mongodb">
+                          mongodb - standard
+                        </SelectItem>
+                        <SelectItem value="mongodb+srv">
+                          mongodb+srv - DNS seed list
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>
                   <Field label="Default database">
-                    <input className="in" placeholder="(optional)" value={fields.defaultDatabase ?? ""} onChange={(e) => f("defaultDatabase", e.target.value || null)} />
+                    <input
+                      className="in"
+                      placeholder="(optional)"
+                      value={fields.defaultDatabase ?? ""}
+                      onChange={(e) =>
+                        f("defaultDatabase", e.target.value || null)
+                      }
+                    />
                   </Field>
                 </div>
                 <div className="two">
                   <Field label="Auth source">
-                    <input className="in" placeholder="admin" value={fields.authSource ?? ""} onChange={(e) => f("authSource", e.target.value || null)} />
+                    <input
+                      className="in"
+                      placeholder="admin"
+                      value={fields.authSource ?? ""}
+                      onChange={(e) => f("authSource", e.target.value || null)}
+                    />
                   </Field>
                   <Field label="Auth mechanism">
-                    <Select value={fields.authMechanism ?? "DEFAULT"} onValueChange={(v) => f("authMechanism", v === "DEFAULT" ? null : v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Select
+                      value={fields.authMechanism ?? "DEFAULT"}
+                      onValueChange={(v) =>
+                        f("authMechanism", v === "DEFAULT" ? null : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="DEFAULT">Default (negotiated)</SelectItem>
-                        <SelectItem value="SCRAM-SHA-256">SCRAM-SHA-256</SelectItem>
+                        <SelectItem value="DEFAULT">
+                          Default (negotiated)
+                        </SelectItem>
+                        <SelectItem value="SCRAM-SHA-256">
+                          SCRAM-SHA-256
+                        </SelectItem>
                         <SelectItem value="SCRAM-SHA-1">SCRAM-SHA-1</SelectItem>
-                        <SelectItem value="MONGODB-X509">X.509 certificate</SelectItem>
+                        <SelectItem value="MONGODB-X509">
+                          X.509 certificate
+                        </SelectItem>
                         <SelectItem value="PLAIN">LDAP (PLAIN)</SelectItem>
                       </SelectContent>
                     </Select>
@@ -297,121 +639,238 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
                 {!srv && (
                   <div className="two">
                     <Field label="Additional hosts">
-                      <input className="in" placeholder="host2:27017, host3:27017" value={fields.extraHosts.join(", ")} onChange={(e) => f("extraHosts", e.target.value.split(",").map((h) => h.trim()).filter(Boolean))} />
+                      <input
+                        className="in"
+                        placeholder="host2:27017, host3:27017"
+                        value={fields.extraHosts.join(", ")}
+                        onChange={(e) =>
+                          f(
+                            "extraHosts",
+                            e.target.value
+                              .split(",")
+                              .map((h) => h.trim())
+                              .filter(Boolean),
+                          )
+                        }
+                      />
                     </Field>
                     <Field label="Replica set">
-                      <input className="in" placeholder="rs0" value={fields.replicaSet ?? ""} onChange={(e) => f("replicaSet", e.target.value || null)} />
+                      <input
+                        className="in"
+                        placeholder="rs0"
+                        value={fields.replicaSet ?? ""}
+                        onChange={(e) =>
+                          f("replicaSet", e.target.value || null)
+                        }
+                      />
                     </Field>
                   </div>
                 )}
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                  <label className="hstack text-[12.5px] text-text-2"><Switch checked={fields.tlsEnabled} onCheckedChange={(v) => f("tlsEnabled", v)} /> TLS/SSL</label>
+                  <label className="hstack text-[12.5px] text-text-2">
+                    <Switch
+                      checked={fields.tlsEnabled}
+                      onCheckedChange={(v) => f("tlsEnabled", v)}
+                    />{" "}
+                    TLS/SSL
+                  </label>
                   {(fields.tlsEnabled || srv) && (
-                    <label className="hstack text-[12.5px] text-text-2"><Switch checked={fields.tlsInsecure} onCheckedChange={(v) => f("tlsInsecure", v)} /> Allow invalid certificates</label>
+                    <label className="hstack text-[12.5px] text-text-2">
+                      <Switch
+                        checked={fields.tlsInsecure}
+                        onCheckedChange={(v) => f("tlsInsecure", v)}
+                      />{" "}
+                      Allow invalid certificates
+                    </label>
                   )}
                   {!srv && (
-                    <label className="hstack text-[12.5px] text-text-2"><Switch checked={fields.directConnection} onCheckedChange={(v) => f("directConnection", v)} /> Direct connection</label>
+                    <label className="hstack text-[12.5px] text-text-2">
+                      <Switch
+                        checked={fields.directConnection}
+                        onCheckedChange={(v) => f("directConnection", v)}
+                      />{" "}
+                      Direct connection
+                    </label>
                   )}
                 </div>
                 {(fields.tlsEnabled || srv) && (
                   <div className="two">
                     <Field label="CA file path">
-                      <input className="in" placeholder="/path/to/ca.pem" value={fields.tlsCaFile ?? ""} onChange={(e) => f("tlsCaFile", e.target.value || null)} />
+                      <input
+                        className="in"
+                        placeholder="/path/to/ca.pem"
+                        value={fields.tlsCaFile ?? ""}
+                        onChange={(e) => f("tlsCaFile", e.target.value || null)}
+                      />
                     </Field>
                     <Field label="Client cert + key (PEM)">
-                      <input className="in" placeholder="/path/to/client.pem" value={fields.tlsCertKeyFile ?? ""} onChange={(e) => f("tlsCertKeyFile", e.target.value || null)} />
+                      <input
+                        className="in"
+                        placeholder="/path/to/client.pem"
+                        value={fields.tlsCertKeyFile ?? ""}
+                        onChange={(e) =>
+                          f("tlsCertKeyFile", e.target.value || null)
+                        }
+                      />
                     </Field>
                   </div>
                 )}
                 <div className="three">
                   <Field label="Read preference">
-                    <Select value={fields.readPreference ?? "primary"} onValueChange={(v) => f("readPreference", v === "primary" ? null : v)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Select
+                      value={fields.readPreference ?? "primary"}
+                      onValueChange={(v) =>
+                        f("readPreference", v === "primary" ? null : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        {["primary", "primaryPreferred", "secondary", "secondaryPreferred", "nearest"].map((v) => (
-                          <SelectItem key={v} value={v}>{v}</SelectItem>
+                        {[
+                          "primary",
+                          "primaryPreferred",
+                          "secondary",
+                          "secondaryPreferred",
+                          "nearest",
+                        ].map((v) => (
+                          <SelectItem key={v} value={v}>
+                            {v}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </Field>
                   <Field label="Connect timeout (ms)">
-                    <input className="in" inputMode="numeric" placeholder="10000" value={fields.connectTimeoutMs ?? ""} onChange={(e) => f("connectTimeoutMs", e.target.value ? parseInt(e.target.value, 10) || null : null)} />
+                    <input
+                      className="in"
+                      inputMode="numeric"
+                      placeholder="10000"
+                      value={fields.connectTimeoutMs ?? ""}
+                      onChange={(e) =>
+                        f(
+                          "connectTimeoutMs",
+                          e.target.value
+                            ? parseInt(e.target.value, 10) || null
+                            : null,
+                        )
+                      }
+                    />
                   </Field>
                   <Field label="Max pool size">
-                    <input className="in" inputMode="numeric" placeholder="10" value={fields.maxPoolSize ?? ""} onChange={(e) => f("maxPoolSize", e.target.value ? parseInt(e.target.value, 10) || null : null)} />
+                    <input
+                      className="in"
+                      inputMode="numeric"
+                      placeholder="10"
+                      value={fields.maxPoolSize ?? ""}
+                      onChange={(e) =>
+                        f(
+                          "maxPoolSize",
+                          e.target.value
+                            ? parseInt(e.target.value, 10) || null
+                            : null,
+                        )
+                      }
+                    />
                   </Field>
                 </div>
                 <Field label="Extra URI options">
-                  <input className="in" placeholder="retryWrites=true&w=majority" value={fields.extraOptions ?? ""} onChange={(e) => f("extraOptions", e.target.value || null)} />
+                  <input
+                    className="in"
+                    placeholder="retryWrites=true&w=majority"
+                    value={fields.extraOptions ?? ""}
+                    onChange={(e) => f("extraOptions", e.target.value || null)}
+                  />
                 </Field>
               </div>
             )}
           </>
         )}
 
-        <div className="stack rounded-[var(--r)] border border-line bg-panel" style={{ padding: ssh.enabled ? 16 : "10px 16px" }}>
+        <div
+          className="stack rounded-[var(--r)] border border-line bg-panel"
+          style={{ padding: ssh.enabled ? 16 : "10px 16px" }}
+        >
           <label className="hstack text-[12.5px] font-medium text-text-2">
-            <Switch checked={ssh.enabled} onCheckedChange={(v) => s("enabled", v)} />
+            <Switch
+              checked={ssh.enabled}
+              onCheckedChange={(v) => s("enabled", v)}
+            />
             Connect through an SSH tunnel
             <span className="ml-auto truncate text-[11px] font-normal text-text-3">
-              {ssh.enabled && ssh.host ? `via ${ssh.username ? `${ssh.username}@` : ""}${ssh.host}` : "bastion / jump host"}
+              {ssh.enabled && ssh.host
+                ? `via ${sshHopLabel(ssh)}${jumpOn && jump.host ? ` (jump ${sshHopLabel(jump)})` : ""}`
+                : "bastion / jump host"}
             </span>
           </label>
           {ssh.enabled && (
             <>
-              <div className="two" style={{ gridTemplateColumns: "1fr 110px" }}>
-                <Field label="SSH host" htmlFor="ssh-host">
-                  <input id="ssh-host" className="in" placeholder="bastion.example.com" value={ssh.host} onChange={(e) => s("host", e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
-                </Field>
-                <Field label="SSH port" htmlFor="ssh-port">
-                  <input id="ssh-port" className="in" inputMode="numeric" placeholder="22" value={ssh.port ?? ""} onChange={(e) => s("port", e.target.value ? parseInt(e.target.value, 10) || null : null)} />
-                </Field>
+              <SshHopFields
+                id="ssh"
+                labels={{
+                  host: "SSH host",
+                  port: "SSH port",
+                  user: "SSH username",
+                  password: "SSH password",
+                }}
+                hostPlaceholder={jumpOn ? "10.0.1.5" : "bastion.example.com"}
+                hop={ssh}
+                onChange={sHop}
+                secret={sshSecret}
+                onSecret={(v) => {
+                  setSshSecret(v);
+                  setTestResult(null);
+                }}
+                secretStored={sshSecretStored}
+              />
+
+              <div
+                className="stack rounded-[var(--r)] border border-line"
+                style={{ padding: jumpOn ? 14 : "8px 14px" }}
+              >
+                <label className="hstack text-[12.5px] font-medium text-text-2">
+                  <Switch
+                    checked={jumpOn}
+                    onCheckedChange={(v) => {
+                      setJumpOn(v);
+                      setTestResult(null);
+                    }}
+                  />
+                  Reach the SSH host through a jump host
+                  <span className="ml-auto truncate text-[11px] font-normal text-text-3">
+                    {jumpOn && jump.host
+                      ? `via ${sshHopLabel(jump)}`
+                      : "like ssh -J"}
+                  </span>
+                </label>
+                {jumpOn && (
+                  <SshHopFields
+                    id="jump"
+                    labels={{
+                      host: "Jump host",
+                      port: "Port",
+                      user: "Username",
+                      password: "Password",
+                    }}
+                    hostPlaceholder="bastion.example.com"
+                    hop={jump}
+                    onChange={j}
+                    secret={jumpSecret}
+                    onSecret={(v) => {
+                      setJumpSecret(v);
+                      setTestResult(null);
+                    }}
+                    secretStored={jumpSecretStored}
+                  />
+                )}
               </div>
-              <div className="two">
-                <Field label="SSH username" htmlFor="ssh-user">
-                  <input id="ssh-user" className="in" placeholder="ubuntu" value={ssh.username} onChange={(e) => s("username", e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
-                </Field>
-                <Field label="Authentication">
-                  <div className="seg no-select" style={{ height: 34 }}>
-                    {SSH_AUTH.map((a) => (
-                      <button key={a.id} type="button" className={cn("flex-1", ssh.auth === a.id && "on")} onClick={() => s("auth", a.id)}>
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                </Field>
-              </div>
-              {ssh.auth === "key" && (
-                <div className="two">
-                  <Field label="Private key" htmlFor="ssh-key">
-                    <div className="in" style={{ padding: "0 4px 0 12px" }}>
-                      <input
-                        id="ssh-key"
-                        className="h-full min-w-0 flex-1 bg-transparent font-mono text-[12.5px] outline-none placeholder:text-text-3"
-                        placeholder="~/.ssh/id_ed25519"
-                        value={ssh.keyPath ?? ""}
-                        onChange={(e) => s("keyPath", e.target.value || null)}
-                        spellCheck={false}
-                      />
-                      <button type="button" className="ico sm" onClick={() => void pickKeyFile()} aria-label="Choose key file">
-                        <FolderOpen />
-                      </button>
-                    </div>
-                  </Field>
-                  <Field label="Key passphrase" htmlFor="ssh-pass">
-                    <SecretInput id="ssh-pass" placeholder={sshSecretStored ? "(unchanged)" : "(none)"} value={sshSecret} onChange={(v) => { setSshSecret(v); setTestResult(null); }} />
-                  </Field>
-                </div>
-              )}
-              {ssh.auth === "password" && (
-                <Field label="SSH password" htmlFor="ssh-pass">
-                  <SecretInput id="ssh-pass" placeholder={sshSecretStored ? "(unchanged)" : "required"} value={sshSecret} onChange={(v) => { setSshSecret(v); setTestResult(null); }} />
-                </Field>
-              )}
+
               <span className="hint">
-                {ssh.auth === "agent" && "Uses the keys loaded in your running ssh-agent. "}
-                Ognom forwards a local port through the bastion to the MongoDB host above and connects to it directly
-                (for a replica set, point it at the member you want). Host keys are checked against ~/.ssh/known_hosts.
+                {(ssh.auth === "agent" || (jumpOn && jump.auth === "agent")) &&
+                  "Uses the keys loaded in your running ssh-agent. "}
+                {jumpOn
+                  ? "Ognom connects to the jump host, opens the SSH session to the SSH host through it, then forwards a local port to the MongoDB host above as the SSH host sees it. For a mongod that only listens on the SSH host itself, use 127.0.0.1:27017. Host keys of both servers are checked against ~/.ssh/known_hosts."
+                  : "Ognom forwards a local port through the bastion to the MongoDB host above and connects to it directly (for a replica set, point it at the member you want). Host keys are checked against ~/.ssh/known_hosts."}
               </span>
             </>
           )}
@@ -419,7 +878,13 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
 
         <div className="two">
           <Field label="Name" htmlFor="conn-name">
-            <input id="conn-name" className="in sans" placeholder={defaultName()} value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              id="conn-name"
+              className="in sans"
+              placeholder={defaultName()}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </Field>
           <Field label="Colour tag">
             <div className="in" style={{ gap: 7 }}>
@@ -442,7 +907,9 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
                   }}
                 />
               ))}
-              <span className="ml-auto text-[11px] text-text-3">shows on the rail</span>
+              <span className="ml-auto text-[11px] text-text-3">
+                shows on the rail
+              </span>
             </div>
           </Field>
         </div>
@@ -453,7 +920,11 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
               <button
                 key={a.id}
                 type="button"
-                className={cn("opt", access === a.id && "on", a.danger && access === a.id && "dgr")}
+                className={cn(
+                  "opt",
+                  access === a.id && "on",
+                  a.danger && access === a.id && "dgr",
+                )}
                 onClick={() => setAccess(a.id)}
                 aria-pressed={access === a.id}
               >
@@ -473,7 +944,8 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
             testResult.ok ? (
               <span className="hint hstack text-ok">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Reachable · {testResult.latencyMs} ms · {testResult.topology} · MongoDB {testResult.serverVersion}
+                Reachable · {testResult.latencyMs} ms · {testResult.topology} ·
+                MongoDB {testResult.serverVersion}
               </span>
             ) : (
               <span className="hint hstack items-start text-danger">
@@ -482,18 +954,29 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
               </span>
             )
           ) : (
-            <span className="hint">Not tested yet - "Test" opens a short-lived connection and closes it again.</span>
+            <span className="hint">
+              Not tested yet - "Test" opens a short-lived connection and closes
+              it again.
+            </span>
           )}
         </Field>
       </div>
 
       <div className="mft">
-        <button className="btn qt" onClick={handleTest} disabled={testing || busy !== null}>
+        <button
+          className="btn qt"
+          onClick={handleTest}
+          disabled={testing || busy !== null}
+        >
           {testing && <Loader2 className="spin" />}
           {testResult ? "Test again" : "Test"}
         </button>
         {!editing && (
-          <button className="btn qt" onClick={handleAdhoc} disabled={busy !== null}>
+          <button
+            className="btn qt"
+            onClick={handleAdhoc}
+            disabled={busy !== null}
+          >
             {busy === "adhoc" && <Loader2 className="spin" />}
             Connect without saving
           </button>
@@ -502,11 +985,19 @@ export function ConnectionForm({ editing, onDone, onCancel }: ConnectionFormProp
           <button className="btn" onClick={onCancel} disabled={busy !== null}>
             Cancel
           </button>
-          <button className="btn" onClick={() => void handleSave(false)} disabled={busy !== null}>
+          <button
+            className="btn"
+            onClick={() => void handleSave(false)}
+            disabled={busy !== null}
+          >
             {busy === "save" && <Loader2 className="spin" />}
             Save
           </button>
-          <button className="btn pri" onClick={() => void handleSave(true)} disabled={busy !== null}>
+          <button
+            className="btn pri"
+            onClick={() => void handleSave(true)}
+            disabled={busy !== null}
+          >
             {busy === "connect" && <Loader2 className="spin" />}
             {editing ? "Save & connect" : "Connect"}
           </button>
