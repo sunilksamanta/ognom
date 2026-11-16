@@ -5,12 +5,19 @@
 //! `direct-tcpip` channel (the same thing `ssh -L` does). The driver then
 //! connects to the local port with `directConnection=true`.
 //!
+//! With a jump host (`ssh -J`), Ognom first connects to the jump host, opens
+//! a `direct-tcpip` channel from there to the SSH server, and runs the SSH
+//! session to the server inside that channel. The MongoDB host is then
+//! resolved by the SSH server, so `127.0.0.1` reaches a mongod that only
+//! listens locally on it.
+//!
 //! Host keys: the server key must match `~/.ssh/known_hosts` when the host is
 //! listed there. Unknown hosts are trusted on first use and remembered in
 //! Ognom's own `known_hosts` file (we never write to the user's ~/.ssh). A
-//! changed key is always a hard error.
+//! changed key is always a hard error. Each hop is checked on its own.
 
-use std::path::PathBuf;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +29,65 @@ use tokio::net::TcpListener;
 use crate::error::{AppError, AppResult};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+
+/// "user@host:port" for display, leaving out an empty user and port 22.
+fn hop_summary(user: &str, host: &str, port: u16) -> String {
+    let (user, host) = (user.trim(), host.trim());
+    match (user.is_empty(), port == 22) {
+        (true, true) => host.to_string(),
+        (true, false) => format!("{host}:{port}"),
+        (false, true) => format!("{user}@{host}"),
+        (false, false) => format!("{user}@{host}:{port}"),
+    }
+}
+
+/// One SSH server on the way to MongoDB. The password (or the private key's
+/// passphrase) is stored encrypted next to the profile, never here.
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SshHop {
+    pub host: String,
+    pub port: Option<u16>,
+    pub username: String,
+    /// "password" | "key" | "agent"
+    pub auth: String,
+    /// Private key file for `auth = "key"`.
+    pub key_path: Option<String>,
+}
+
+impl SshHop {
+    pub fn port(&self) -> u16 {
+        self.port.unwrap_or(22)
+    }
+
+    pub fn summary(&self) -> String {
+        hop_summary(&self.username, &self.host, self.port())
+    }
+
+    /// Whether this hop authenticates with a stored password / passphrase.
+    pub fn uses_secret(&self) -> bool {
+        self.auth != "agent"
+    }
+
+    /// `what` names the hop in messages: "SSH tunnel" or "jump host".
+    fn validate(&self, what: &str) -> AppResult<()> {
+        let fail = |msg: String| Err(AppError::Other(msg));
+        if self.host.trim().is_empty() {
+            return fail(format!("enter the {what} address"));
+        }
+        if self.username.trim().is_empty() {
+            return fail(format!("{what} username is required"));
+        }
+        match self.auth.as_str() {
+            "password" | "agent" => Ok(()),
+            "key" if self.key_path.as_deref().map(str::trim).unwrap_or("").is_empty() => {
+                fail(format!("choose a private key file for the {what}"))
+            }
+            "key" => Ok(()),
+            other => fail(format!("unknown {what} auth method '{other}'")),
+        }
+    }
+}
 
 /// Non-secret SSH settings saved with a profile. The password (or the private
 /// key's passphrase) is stored encrypted next to it, never here.
@@ -36,6 +102,9 @@ pub struct SshConfig {
     pub auth: String,
     /// Private key file for `auth = "key"`.
     pub key_path: Option<String>,
+    /// Optional jump host (`ssh -J`): Ognom connects to it first and reaches
+    /// `host` through it, so `host` only has to be reachable from the jump host.
+    pub jump: Option<SshHop>,
 }
 
 impl SshConfig {
@@ -47,16 +116,28 @@ impl SshConfig {
         self.port.unwrap_or(22)
     }
 
-    /// "user@bastion:22" for display.
+    /// The SSH server the MongoDB traffic leaves from, as a hop.
+    pub fn server(&self) -> SshHop {
+        SshHop {
+            host: self.host.clone(),
+            port: self.port,
+            username: self.username.clone(),
+            auth: self.auth.clone(),
+            key_path: self.key_path.clone(),
+        }
+    }
+
+    /// The jump host, when the tunnel is active and has one.
+    pub fn active_jump(&self) -> Option<&SshHop> {
+        self.jump.as_ref().filter(|_| self.is_active())
+    }
+
+    /// "user@server" or "user@server (jump user@bastion)" for display.
     pub fn summary(&self) -> String {
-        let user = self.username.trim();
-        let host = self.host.trim();
-        let port = self.port();
-        match (user.is_empty(), port == 22) {
-            (true, true) => host.to_string(),
-            (true, false) => format!("{host}:{port}"),
-            (false, true) => format!("{user}@{host}"),
-            (false, false) => format!("{user}@{host}:{port}"),
+        let server = hop_summary(&self.username, &self.host, self.port());
+        match &self.jump {
+            Some(jump) => format!("{server} (jump {})", jump.summary()),
+            None => server,
         }
     }
 
@@ -64,25 +145,33 @@ impl SshConfig {
         if !self.is_active() {
             return Ok(());
         }
-        if self.username.trim().is_empty() {
-            return Err(AppError::Other("SSH username is required".into()));
+        self.server().validate("SSH tunnel")?;
+        if let Some(jump) = &self.jump {
+            jump.validate("jump host")?;
         }
-        match self.auth.as_str() {
-            "password" | "agent" => Ok(()),
-            "key" if self.key_path.as_deref().map(str::trim).unwrap_or("").is_empty() => {
-                Err(AppError::Other("choose a private key file for the SSH tunnel".into()))
-            }
-            "key" => Ok(()),
-            other => Err(AppError::Other(format!("unknown SSH auth method '{other}'"))),
-        }
+        Ok(())
     }
 }
+
+/// Decrypted SSH passwords / key passphrases for one tunnel.
+#[derive(Clone, Default)]
+pub struct SshSecrets {
+    /// For the SSH server (`SshConfig::host`).
+    pub server: Option<String>,
+    /// For the jump host, when there is one.
+    pub jump: Option<String>,
+}
+
+type Session = client::Handle<HostKeyCheck>;
 
 /// A running tunnel. Dropping it stops accepting new sockets; sockets already
 /// forwarded close with the driver's connections.
 pub struct Tunnel {
     pub local_port: u16,
     accept_task: tokio::task::JoinHandle<()>,
+    /// The session to the jump host, if any. The forwarding session runs
+    /// inside one of its channels, so it lives as long as the tunnel.
+    _jump: Option<Session>,
 }
 
 impl Drop for Tunnel {
@@ -149,70 +238,70 @@ fn ssh_err(e: impl std::fmt::Display) -> AppError {
     AppError::Other(format!("SSH: {e}"))
 }
 
-/// Connect + authenticate to the bastion, then start forwarding a local port
-/// to `target_host:target_port` (as seen from the bastion).
+/// Connect + authenticate to the SSH server (through the jump host, when there
+/// is one), then start forwarding a local port to `target_host:target_port`
+/// as seen from the SSH server.
 pub async fn open(
     cfg: &SshConfig,
-    secret: Option<&str>,
+    secrets: &SshSecrets,
     target_host: &str,
     target_port: u16,
-    data_dir: &std::path::Path,
+    data_dir: &Path,
 ) -> AppResult<Tunnel> {
     cfg.validate()?;
-    let host = cfg.host.trim().to_string();
-    let port = cfg.port();
-    let user = cfg.username.trim().to_string();
+    let known_hosts = data_dir.join("known_hosts");
+    let server = cfg.server();
+    let server_addr = format!("{}:{}", server.host.trim(), server.port());
 
-    let rejected = Arc::new(std::sync::Mutex::new(None));
-    let handler = HostKeyCheck {
-        host: host.clone(),
-        port,
-        ognom_known_hosts: data_dir.join("known_hosts"),
-        rejected: rejected.clone(),
-    };
-    let config = Arc::new(client::Config {
-        inactivity_timeout: None,
-        keepalive_interval: Some(Duration::from_secs(30)),
-        nodelay: true,
-        ..Default::default()
-    });
-
-    let connecting = client::connect(config, (host.as_str(), port), handler);
-    let mut session = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
-        Err(_) => return Err(ssh_err(format!("timed out connecting to {host}:{port}"))),
-        Ok(Err(e)) => {
-            if let Some(why) = rejected.lock().unwrap().take() {
-                return Err(ssh_err(why));
-            }
-            return Err(ssh_err(format!("could not connect to {host}:{port} - {e}")));
+    let (jump_session, session) = match cfg.active_jump() {
+        None => {
+            let secret = secrets.server.as_deref();
+            let session = open_session(&server, secret, &known_hosts, &server_addr, |config, handler| {
+                client::connect(config, (server.host.trim(), server.port()), handler)
+            })
+            .await?;
+            (None, session)
         }
-        Ok(Ok(s)) => s,
-    };
-
-    let ok = match cfg.auth.as_str() {
-        "password" => session
-            .authenticate_password(&user, secret.unwrap_or(""))
-            .await
-            .map_err(ssh_err)?
-            .success(),
-        "key" => {
-            let path = expand_home(cfg.key_path.as_deref().unwrap_or("").trim());
-            let key = keys::load_secret_key(&path, secret.filter(|s| !s.is_empty())).map_err(|e| {
-                ssh_err(format!("could not read the private key {}: {e}", path.display()))
-            })?;
-            let hash = session.best_supported_rsa_hash().await.map_err(ssh_err)?.flatten();
-            session
-                .authenticate_publickey(&user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
-                .await
-                .map_err(ssh_err)?
-                .success()
+        Some(jump) => {
+            let jump_addr = format!("{}:{}", jump.host.trim(), jump.port());
+            let secret = secrets.jump.as_deref();
+            let jump_session = open_session(jump, secret, &known_hosts, &jump_addr, |config, handler| {
+                client::connect(config, (jump.host.trim(), jump.port()), handler)
+            })
+            .await?;
+            // A TCP stream from the jump host to the SSH server; the second
+            // SSH session runs inside it, exactly like `ssh -J`.
+            let opening = jump_session.channel_open_direct_tcpip(
+                server.host.trim(),
+                u32::from(server.port()),
+                "127.0.0.1",
+                0,
+            );
+            let channel = match tokio::time::timeout(CONNECT_TIMEOUT, opening).await {
+                Err(_) => {
+                    return Err(ssh_err(format!(
+                        "timed out while the jump host {} was connecting to {server_addr}",
+                        jump.summary()
+                    )))
+                }
+                Ok(Err(e)) => {
+                    return Err(ssh_err(format!(
+                        "the jump host {} could not reach {server_addr} - {e}",
+                        jump.summary()
+                    )))
+                }
+                Ok(Ok(c)) => c,
+            };
+            let stream = channel.into_stream();
+            let label = format!("{server_addr} through the jump host");
+            let secret = secrets.server.as_deref();
+            let session = open_session(&server, secret, &known_hosts, &label, move |config, handler| {
+                client::connect_stream(config, stream, handler)
+            })
+            .await?;
+            (Some(jump_session), session)
         }
-        "agent" => authenticate_with_agent(&mut session, &user).await?,
-        other => return Err(ssh_err(format!("unknown auth method '{other}'"))),
     };
-    if !ok {
-        return Err(ssh_err(format!("authentication failed for {user}@{host}")));
-    }
 
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let local_port = listener.local_addr()?.port();
@@ -244,7 +333,75 @@ pub async fn open(
         }
     });
 
-    Ok(Tunnel { local_port, accept_task })
+    Ok(Tunnel { local_port, accept_task, _jump: jump_session })
+}
+
+/// SSH handshake (via `connect`, over TCP or over a jump-host channel), host
+/// key check, then authentication for one hop. `addr` names the hop in errors.
+async fn open_session<F, Fut>(
+    hop: &SshHop,
+    secret: Option<&str>,
+    known_hosts: &Path,
+    addr: &str,
+    connect: F,
+) -> AppResult<Session>
+where
+    F: FnOnce(Arc<client::Config>, HostKeyCheck) -> Fut,
+    Fut: Future<Output = Result<Session, russh::Error>>,
+{
+    let host = hop.host.trim().to_string();
+    let user = hop.username.trim().to_string();
+
+    let rejected = Arc::new(std::sync::Mutex::new(None));
+    let handler = HostKeyCheck {
+        host: host.clone(),
+        port: hop.port(),
+        ognom_known_hosts: known_hosts.to_path_buf(),
+        rejected: rejected.clone(),
+    };
+    let config = Arc::new(client::Config {
+        inactivity_timeout: None,
+        keepalive_interval: Some(Duration::from_secs(30)),
+        nodelay: true,
+        ..Default::default()
+    });
+
+    let mut session = match tokio::time::timeout(CONNECT_TIMEOUT, connect(config, handler)).await {
+        Err(_) => return Err(ssh_err(format!("timed out connecting to {addr}"))),
+        Ok(Err(e)) => {
+            if let Some(why) = rejected.lock().unwrap().take() {
+                return Err(ssh_err(why));
+            }
+            return Err(ssh_err(format!("could not connect to {addr} - {e}")));
+        }
+        Ok(Ok(s)) => s,
+    };
+
+    let ok = match hop.auth.as_str() {
+        "password" => session
+            .authenticate_password(&user, secret.unwrap_or(""))
+            .await
+            .map_err(ssh_err)?
+            .success(),
+        "key" => {
+            let path = expand_home(hop.key_path.as_deref().unwrap_or("").trim());
+            let key = keys::load_secret_key(&path, secret.filter(|s| !s.is_empty())).map_err(|e| {
+                ssh_err(format!("could not read the private key {}: {e}", path.display()))
+            })?;
+            let hash = session.best_supported_rsa_hash().await.map_err(ssh_err)?.flatten();
+            session
+                .authenticate_publickey(&user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+                .await
+                .map_err(ssh_err)?
+                .success()
+        }
+        "agent" => authenticate_with_agent(&mut session, &user).await?,
+        other => return Err(ssh_err(format!("unknown auth method '{other}'"))),
+    };
+    if !ok {
+        return Err(ssh_err(format!("authentication failed for {user}@{host}")));
+    }
+    Ok(session)
 }
 
 async fn authenticate_with_agent<H: client::Handler>(
@@ -310,5 +467,48 @@ mod tests {
         };
         assert!(c.validate().is_err());
         assert!(SshConfig::default().validate().is_ok());
+    }
+
+    fn with_jump(jump: SshHop) -> SshConfig {
+        SshConfig {
+            enabled: true,
+            host: "10.0.1.5".into(),
+            username: "app".into(),
+            auth: "agent".into(),
+            jump: Some(jump),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn summary_names_the_jump_host() {
+        let c = with_jump(SshHop { host: "bastion".into(), username: "ops".into(), port: Some(2222), ..Default::default() });
+        assert_eq!(c.summary(), "app@10.0.1.5 (jump ops@bastion:2222)");
+    }
+
+    #[test]
+    fn validate_checks_the_jump_host() {
+        let ok = SshHop { host: "bastion".into(), username: "ops".into(), auth: "agent".into(), ..Default::default() };
+        assert!(with_jump(ok.clone()).validate().is_ok());
+        assert!(with_jump(SshHop { host: " ".into(), ..ok.clone() }).validate().is_err());
+        assert!(with_jump(SshHop { username: "".into(), ..ok.clone() }).validate().is_err());
+        assert!(with_jump(SshHop { auth: "key".into(), key_path: None, ..ok }).validate().is_err());
+    }
+
+    #[test]
+    fn jump_is_ignored_while_the_tunnel_is_off() {
+        let mut c = with_jump(SshHop::default());
+        c.enabled = false;
+        assert!(c.validate().is_ok());
+        assert!(c.active_jump().is_none());
+    }
+
+    #[test]
+    fn profiles_saved_before_jump_hosts_still_load() {
+        let old = r#"{"enabled":true,"host":"b","port":22,"username":"u","auth":"agent","keyPath":null}"#;
+        let c: SshConfig = serde_json::from_str(old).unwrap();
+        assert!(c.jump.is_none());
+        let off: SshConfig = serde_json::from_str(r#"{"enabled":true,"host":"b","jump":null}"#).unwrap();
+        assert!(off.jump.is_none());
     }
 }

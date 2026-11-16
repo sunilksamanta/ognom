@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::crypto::Crypto;
 use crate::error::{AppError, AppResult};
-use crate::ssh::SshConfig;
+use crate::ssh::{SshConfig, SshSecrets};
 
 /// Percent-encode a URI component (RFC 3986 unreserved set passes through).
 pub fn pct_encode(s: &str) -> String {
@@ -363,6 +363,9 @@ pub struct StoredProfile {
     /// Encrypted SSH password or private-key passphrase.
     #[serde(default)]
     pub ssh_secret_enc: Option<String>,
+    /// Encrypted password or key passphrase for the SSH jump host.
+    #[serde(default)]
+    pub ssh_jump_secret_enc: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
 }
@@ -387,6 +390,9 @@ pub struct ProfileInput {
     /// Plaintext SSH password / key passphrase; None on edit keeps the stored one.
     #[serde(default)]
     pub ssh_secret: Option<String>,
+    /// Same, for the SSH jump host.
+    #[serde(default)]
+    pub ssh_jump_secret: Option<String>,
 }
 
 /// What the UI gets back. Never contains secrets.
@@ -405,6 +411,7 @@ pub struct ProfileSummary {
     pub fields: ConnFields,
     pub ssh: SshConfig,
     pub has_ssh_secret: bool,
+    pub has_ssh_jump_secret: bool,
     pub last_used_at: Option<String>,
 }
 
@@ -465,6 +472,7 @@ impl StoredProfile {
             fields,
             ssh: self.ssh.clone(),
             has_ssh_secret: self.ssh_secret_enc.is_some(),
+            has_ssh_jump_secret: self.ssh_jump_secret_enc.is_some(),
             last_used_at: self.last_used_at.clone(),
         }
     }
@@ -591,15 +599,22 @@ impl ProfileStore {
             (None, None) => None,
         };
 
-        // SSH secret: agent auth and disabled tunnels keep none; otherwise a
+        // SSH secrets: agent auth and disabled tunnels keep none; otherwise a
         // newly typed one replaces the stored one, and blank keeps it.
-        let ssh_needs_secret = input.ssh.is_active() && input.ssh.auth != "agent";
-        let ssh_secret_enc = match (input.ssh_secret.as_deref().filter(|s| !s.is_empty()), existing) {
-            _ if !ssh_needs_secret => None,
-            (Some(plain), _) => Some(crypto.encrypt(plain)?),
-            (None, Some(idx)) => self.profiles[idx].ssh_secret_enc.clone(),
-            (None, None) => None,
-        };
+        let ssh_needs_secret = input.ssh.is_active() && input.ssh.server().uses_secret();
+        let ssh_secret_enc = keep_or_encrypt(
+            ssh_needs_secret,
+            input.ssh_secret.as_deref(),
+            existing.and_then(|i| self.profiles[i].ssh_secret_enc.as_ref()),
+            crypto,
+        )?;
+        let jump_needs_secret = input.ssh.active_jump().map(|j| j.uses_secret()).unwrap_or(false);
+        let ssh_jump_secret_enc = keep_or_encrypt(
+            jump_needs_secret,
+            input.ssh_jump_secret.as_deref(),
+            existing.and_then(|i| self.profiles[i].ssh_jump_secret_enc.as_ref()),
+            crypto,
+        )?;
 
         // URI profiles keep their fields in step with the URI so exports and
         // the form's host/credentials view stay truthful.
@@ -624,6 +639,7 @@ impl ProfileStore {
             secret_enc,
             ssh: input.ssh.clone(),
             ssh_secret_enc,
+            ssh_jump_secret_enc,
             created_at: existing
                 .map(|i| self.profiles[i].created_at.clone())
                 .unwrap_or_else(|| now.clone()),
@@ -688,6 +704,10 @@ impl ProfileStore {
                 (Some(enc), true) => Some(crypto.decrypt(enc)?),
                 _ => None,
             };
+            let ssh_jump_secret = match (&p.ssh_jump_secret_enc, include_secrets) {
+                (Some(enc), true) => Some(crypto.decrypt(enc)?),
+                _ => None,
+            };
             out.push(crate::portable::ExportConn {
                 name: p.name.clone(),
                 color: p.color.clone(),
@@ -698,6 +718,7 @@ impl ProfileStore {
                 secret,
                 ssh: p.ssh.clone(),
                 ssh_secret,
+                ssh_jump_secret,
             });
         }
         Ok(out)
@@ -718,6 +739,10 @@ impl ProfileStore {
                 _ => None,
             };
             let ssh_secret_enc = match &c.ssh_secret {
+                Some(s) if !s.is_empty() => Some(crypto.encrypt(s)?),
+                _ => None,
+            };
+            let ssh_jump_secret_enc = match &c.ssh_jump_secret {
                 Some(s) if !s.is_empty() => Some(crypto.encrypt(s)?),
                 _ => None,
             };
@@ -751,6 +776,7 @@ impl ProfileStore {
                 secret_enc,
                 ssh: c.ssh,
                 ssh_secret_enc,
+                ssh_jump_secret_enc,
                 created_at: now,
                 last_used_at: None,
             });
@@ -783,17 +809,35 @@ impl ProfileStore {
 }
 
 impl ProfileStore {
-    /// The SSH tunnel for a saved profile (with its decrypted secret), if any.
-    pub fn ssh_for(&self, id: &str, crypto: &Crypto) -> AppResult<Option<(SshConfig, Option<String>)>> {
+    /// The SSH tunnel for a saved profile (with its decrypted secrets), if any.
+    pub fn ssh_for(&self, id: &str, crypto: &Crypto) -> AppResult<Option<(SshConfig, SshSecrets)>> {
         let p = self.get(id)?;
         if !p.ssh.is_active() {
             return Ok(None);
         }
-        let secret = match &p.ssh_secret_enc {
-            Some(enc) => Some(crypto.decrypt(enc)?),
-            None => None,
+        let decrypt = |enc: &Option<String>| enc.as_ref().map(|e| crypto.decrypt(e)).transpose();
+        let secrets = SshSecrets {
+            server: decrypt(&p.ssh_secret_enc)?,
+            jump: if p.ssh.jump.is_some() { decrypt(&p.ssh_jump_secret_enc)? } else { None },
         };
-        Ok(Some((p.ssh.clone(), secret)))
+        Ok(Some((p.ssh.clone(), secrets)))
+    }
+}
+
+/// A newly typed secret replaces the stored one and a blank one keeps it;
+/// none is kept when the hop doesn't use one.
+fn keep_or_encrypt(
+    needed: bool,
+    typed: Option<&str>,
+    stored: Option<&String>,
+    crypto: &Crypto,
+) -> AppResult<Option<String>> {
+    if !needed {
+        return Ok(None);
+    }
+    match typed.filter(|s| !s.is_empty()) {
+        Some(plain) => Ok(Some(crypto.encrypt(plain)?)),
+        None => Ok(stored.cloned()),
     }
 }
 

@@ -72,7 +72,7 @@ export function ConnectionManager() {
         password: null,
         ssh: p.ssh,
       });
-      toast.success(p.hasSecret || p.hasSshSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
+      toast.success(p.hasSecret || p.hasSshSecret || p.hasSshJumpSecret ? "Duplicated - re-enter the password on the copy" : "Duplicated");
     } catch (e) {
       toast.error(errMsg(e));
     }
