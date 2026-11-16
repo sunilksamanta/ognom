@@ -217,12 +217,10 @@ export function ConnectionManager() {
                             className={cn("idxrow group cursor-pointer hover:bg-hover", connectingId === p.id && "acc")}
                           >
                             <span
-                              className={cn("cx", p.access === "production" && "prod", p.access === "readonly" && "ro", !live && "off")}
-                              style={{ width: 32, height: 32, fontSize: 11 }}
+                              className={cn("cx", p.color && "tagged", p.access === "production" && "prod", !live && "off")}
+                              style={{ width: 32, height: 32, fontSize: 11, ...(p.color ? { "--tag": p.color } : {}) } as React.CSSProperties}
                             >
-                              {p.color && <span className="tag" style={{ background: p.color }} />}
                               {initials(p.name)}
-                              <i />
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="hstack">

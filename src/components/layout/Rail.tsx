@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, Brush, CircleHelp, Database, Loader2, Server, Settings } from "lucide-react";
+import { Activity, CircleHelp, Database, Loader2, Server } from "lucide-react";
 import { OgnomMark } from "@/components/brand/OgnomMark";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -30,11 +30,12 @@ export function initials(name: string): string {
 
 /**
  * The rail: connection tiles first (saved profiles + any ad-hoc workspaces),
- * then the sections, then appearance / settings pinned to the bottom.
- * Tiles: the active workspace is a solid accent (red for production) tile
- * with a bar on the left; other open workspaces keep a green dot; saved but
- * disconnected profiles are dimmed. Colour tag top-left, dashed border =
- * read-only, red border = production.
+ * then the sections pinned to the bottom. Appearance and settings live in
+ * the title bar.
+ * Tiles carry one signal each: the active workspace is a solid accent (red
+ * for production) tile with a bar on the left, disconnected profiles are
+ * dimmed, production is red, and the initials take the colour tag. Read-only
+ * lives in the tooltip and the status bar.
  */
 export function Rail() {
   const profiles = useConnections((s) => s.profiles);
@@ -60,7 +61,6 @@ export function Rail() {
     const live = !!ws;
     const on = live && ws!.info.id === activeId;
     const busy = p ? connectingId === p.id : false;
-    const readOnly = ws ? ws.readOnly : access !== "readwrite";
     const prod = access === "production";
     const label = `${name}${prod ? " · production" : access === "readonly" ? " · read-only" : ""}${on ? " · active" : live ? " · open in background" : " · disconnected"}`;
     const onClick = () => {
@@ -77,18 +77,17 @@ export function Rail() {
                 disabled={busy || (status === "connecting" && !ws)}
                 className={cn(
                   "cx",
+                  color && "tagged",
                   on && "on",
-                  readOnly && live && "ro",
                   prod && "prod",
                   !live && "off",
                   busy && "busy"
                 )}
+                style={color ? ({ "--tag": color } as React.CSSProperties) : undefined}
                 aria-label={label}
                 aria-pressed={on}
               >
-                {color && <span className="tag" style={{ background: color }} />}
                 {busy ? <Loader2 className="spin" style={{ width: 13, height: 13 }} /> : initials(name)}
-                <i />
               </button>
             </ContextMenuTrigger>
           </TooltipTrigger>
@@ -162,6 +161,7 @@ export function Rail() {
         </Tooltip>
       </div>
 
+      <div className="sp" />
       {section("Data (⌘B toggles the picker)", <Database />, togglePicker, {
         on: connected && !pickerCollapsed,
         disabled: !connected,
@@ -169,9 +169,6 @@ export function Rail() {
       {section("Server", <Server />, () => ui({ serverInfo: true }), { disabled: !connected })}
       {section("Operations", <Activity />, () => ui({ ops: true }), { disabled: !connected })}
       {section("Help", <CircleHelp />, () => ui({ help: true }))}
-      <div className="sp" />
-      {section("Appearance", <Brush />, () => ui({ appearance: true }))}
-      {section("Settings", <Settings />, () => ui({ settings: true }))}
 
       <ConfirmDialog
         open={!!confirmClose}
